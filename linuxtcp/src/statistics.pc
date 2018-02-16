@@ -1,0 +1,16 @@
+#ifndef STATISTICS_PC
+#define STATISTICS_PC
+#define STAT_INC(x) { ptcp_statistics.x++; }
+#define STAT_DEC(x) { ptcp_statistics.x++; }
+#define STAT_VAL(x) let y :> ulong in { y = ptcp_statistics.x; }, y end
+
+module Statistics {
+  
+  static mark-got-segment ::= STAT_INC(TcpInSegs);
+  static mark-got-bad-segment ::= STAT_INC(TcpInErrs);
+  
+};
+
+#undef STAT_INC
+#undef STAT_VAL
+#endif

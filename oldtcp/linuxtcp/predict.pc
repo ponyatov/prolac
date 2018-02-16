@@ -1,0 +1,35 @@
+#ifndef PREDICT_PC
+#define PREDICT_PC
+
+module Header-Prediction.Input :> P-Input
+has Segment, Reassembly, .Output {
+  
+  do-segment ::=
+    (predicted ==> fast-path)
+    || normal-path;
+  
+  predicted :> bool ::= established && expected-packet-flags &&
+    expected-seqno(seg->seqno) && ack-predicted && !reassembly-queue;
+  
+  ack-predicted :> bool ::= valid-ack(seg->ackno) && !retransmitting;
+  
+  fast-path ::= /* STAT */
+    // NOTE: using mark-ack increases code duplication.
+    (unseen-ack(seg->ackno) ==> new-ack-hook(seg->ackno)), // XXX RTT HERE
+    // XXX checking congestion window
+    update-send-window(seg),
+    (seg->len > 0 ==> inline Reassembly(seg, tcb).easy-reassemble),
+    socket->mark-writable,
+    (socket->sendable || ack-pending ==> Output(tcb).do);
+  
+  normal-path ::= super.do-segment;
+
+} inline (predicted, ack-predicted, fast-path)
+  inline[0] do-input;
+
+
+// hookup code
+module Header-Prediction.P-Input ::= CUR_INPUT;
+#undef CUR_INPUT
+#define CUR_INPUT	Header-Prediction.Input
+#endif

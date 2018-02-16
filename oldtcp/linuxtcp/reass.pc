@@ -1,0 +1,125 @@
+#ifndef REASS_PC
+#define REASS_PC
+
+
+module Base.Reassembly :> .Input has .Segment, Segment-Link {
+  
+  field queue :> *Segment;
+  
+  // BSD's `optimized' memory allocation is really annoying & makes this
+  // code a lot harder to write.
+  
+  do :> bool ::= (seg->seqlen ==> reassemble) 
+       ||| (/*{printk("Segment has no data after trimming. Freeing...\n"); }, */
+	   seg->free-read, false);
+  
+  reassemble :> bool ::=
+    can-easy-reassemble ==> easy-reassemble
+    ||| difficult-reassemble;
+  
+  can-easy-reassemble :> bool ::=
+    !reassembly-queue
+    && expected-seqno(seg->seqno)
+    && established;
+  
+  
+  difficult-reassemble :> bool ::=
+    mark-pending-ack, // XXX best place?
+    // Ignore a completely empty segment.
+    seg->seqlen == 0 
+    ==> ( /*{printk("No data in difficult-reassemble. Freeing...\n");},*/
+	  seg->free-read, false)
+    ||| difficult-reassemble-work;
+  
+  difficult-reassemble-work :> bool ::=
+    { PDEBUG("reass.pc:difficult-reassemble-work\n"); }
+    queue = reassembly-queue,
+    (queue ==> insert-into-nonempty-queue
+     ||| seg->insert-link-before(tcb)),
+    inline[0] print-reassembly-queue,
+    (seg ==> difficult-send-to-user ||| false);
+  
+  insert-into-nonempty-queue ::=
+    queue = queue->find-overlapping(seg->seqno, tcb),
+    (queue && front-overlaps ==> remove-front-overlaps),
+    seg ==> (queue ==> remove-back-overlaps(seg->right)),
+            (queue ==> seg->insert-link-before(queue)
+	     ||| seg->insert-link-before(tcb));
+  
+  
+  front-overlaps :> bool ::= queue->left <= seg->seqno;
+  remove-front-overlaps ::=
+    assertion(front-overlaps),
+    let edge = queue->right in
+      trim-against(edge, seg) ==> duplicate-packet
+      ||| move-forward-and-try-front-overlaps-again
+    end;
+  
+  // This logic is different than BSD (v2p914), which adjusts the
+  // segments already in the queue rather than the incoming segment.
+  move-forward-and-try-front-overlaps-again ::=
+    queue = segment-after(queue),
+    queue && front-overlaps ==> remove-front-overlaps;
+  
+  remove-back-overlaps(edge :> seqint) ::=
+    trim-against(edge, queue) ==>
+      let next = segment-after(queue) in
+        queue->delete-link, 
+        //{printk("Removing back overlaps. Freeing...\n"); }, 
+	queue->free-read,
+        // XXX destroy `queue'
+        queue = next,
+        (queue ==> remove-back-overlaps(edge))
+      end;
+  
+  // Returns true iff the segment was a complete duplicate.
+  trim-against(edge :> seqint, seg :> *Segment) :> bool ::=
+    edge <= seg->left ==> false
+    ||| edge >= seg->right ==> true
+    ||| seg->trim-front(edge - seg->left), // XXX trim-front does urg
+	false;
+  
+  duplicate-packet ::=
+//    { printk("Reassembling duplicate packet. Freeing...\n"); }, 
+      tcb->print, seg->print, seg->free-read, false;
+  
+  
+  easy-reassemble :> bool ::= 
+    mark-pending-ack, // XXX best place?
+    segment-to-user(seg),
+    seg->fin;
+  
+  segment-to-user(seg :> *Segment) ::=
+    //let irs=tcb->irs, rl=tcb->receive-window-left, sl=seg->left in { PDEBUG("segment-to-user %d::::%d\n", rl-irs, sl-irs); } end,
+    (socket->can-receive ==> (tcb->receive-hook(seg->len),
+			      socket->receive-data(seg))
+     ||| ( //{printk("Socket can't receive. Freeing seg...\n");}, 
+	  seg->free-read),
+    // STAT rcvpack, rcvbyte
+    socket->mark-readable;
+  
+  
+  difficult-send-to-user :> bool ::=
+    queue = reassembly-queue,
+    !connection-exists || !queue ==> false
+    ||| !expected-seqno(queue->seqno) ==> false
+    ||| syn-received ==> false // XXX "& length nonzero"
+    ||| reassemble-to-user;
+  
+  reassemble-to-user :> bool ::=
+    { PDEBUG("Reassemble to user.\n"); }
+    let was-fin = queue->fin, next = segment-after(queue) in
+      queue->delete-link,
+      segment-to-user(queue),
+      print-reassembly-queue,
+      // XXX delete queue
+      queue = next,
+      queue && expected-seqno(queue->seqno) ==> reassemble-to-user
+      ||| was-fin
+    end;
+  
+} inline[0] (difficult-reassemble);
+
+
+#define CUR_REASSEMBLY	Base.Reassembly
+#endif

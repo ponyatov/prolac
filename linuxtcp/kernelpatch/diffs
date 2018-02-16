@@ -1,0 +1,285 @@
+diff -rcP -x .* -x *.[ao] olinux-2.2.11/include/net/tcp.h linux-2.2.11/include/net/tcp.h
+*** olinux-2.2.11/include/net/tcp.h	Mon Aug  9 15:05:13 1999
+--- linux-2.2.11/include/net/tcp.h	Tue Aug 17 18:06:03 1999
+***************
+*** 451,459 ****
+--- 451,468 ----
+  extern struct proto tcp_prot;
+  extern struct tcp_mib tcp_statistics;
+  
++ #ifdef CONFIG_TCP_ALTERNATE_STACK
++ extern struct proto *alternate_tcp_prot;
++ extern int (*alternate_tcp_rcv)(struct sk_buff *, unsigned short);
++ extern void (*alternate_tcp_err)(struct sk_buff *, unsigned char *, int);
++ 
++ extern void			tcp_v4_steal_sock(struct sock *sk);
++ #endif
++ 
+  extern void			tcp_put_port(struct sock *sk);
+  extern void			__tcp_put_port(struct sock *sk);
+  extern void			tcp_inherit_port(struct sock *sk, struct sock *child);
++ extern void			__tcp_inherit_port(struct sock *sk, struct sock *child);
+  
+  extern void			tcp_v4_err(struct sk_buff *skb,
+  					   unsigned char *, int);
+diff -rcP -x .* -x *.[ao] olinux-2.2.11/net/ipv4/Config.in linux-2.2.11/net/ipv4/Config.in
+*** olinux-2.2.11/net/ipv4/Config.in	Sun Mar 21 10:22:00 1999
+--- linux-2.2.11/net/ipv4/Config.in	Mon Aug 16 22:49:20 1999
+***************
+*** 85,88 ****
+  #if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then 
+  #bool 'IP: support experimental checksum copy to user for UDP'  CONFIG_UDP_DELAY_CSUM
+  #fi
+! 
+--- 85,90 ----
+  #if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then 
+  #bool 'IP: support experimental checksum copy to user for UDP'  CONFIG_UDP_DELAY_CSUM
+  #fi
+! if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
+!   bool 'IP: enable alternate TCP stack (EXPERIMENTAL)' CONFIG_TCP_ALTERNATE_STACK
+! fi
+diff -rcP -x .* -x *.[ao] olinux-2.2.11/net/ipv4/af_inet.c linux-2.2.11/net/ipv4/af_inet.c
+*** olinux-2.2.11/net/ipv4/af_inet.c	Mon Aug  9 15:05:13 1999
+--- linux-2.2.11/net/ipv4/af_inet.c	Wed Aug 18 01:29:55 1999
+***************
+*** 360,366 ****
+--- 360,370 ----
+  			sk->ip_pmtudisc = IP_PMTUDISC_DONT;
+  		else
+  			sk->ip_pmtudisc = IP_PMTUDISC_WANT;
++ #ifdef CONFIG_TCP_ALTERNATE_STACK
++ 		prot = (alternate_tcp_prot ? alternate_tcp_prot : &tcp_prot);
++ #else
+  		prot = &tcp_prot;
++ #endif
+  		sock->ops = &inet_stream_ops;
+  		break;
+  	case SOCK_SEQPACKET:
+diff -rcP -x .* -x *.[ao] olinux-2.2.11/net/ipv4/proc.c linux-2.2.11/net/ipv4/proc.c
+*** olinux-2.2.11/net/ipv4/proc.c	Mon Feb  8 12:26:29 1999
+--- linux-2.2.11/net/ipv4/proc.c	Wed Aug 18 09:04:20 1999
+***************
+*** 162,168 ****
+   *  Assumes that buffer length is a multiply of 128 - if not it will
+   *  write past the end.   
+   */
+! static int
+  get__netinfo(struct proto *pro, char *buffer, int format, char **start, off_t offset, int length)
+  {
+  	struct sock *sp, *next;
+--- 162,168 ----
+   *  Assumes that buffer length is a multiply of 128 - if not it will
+   *  write past the end.   
+   */
+! int
+  get__netinfo(struct proto *pro, char *buffer, int format, char **start, off_t offset, int length)
+  {
+  	struct sock *sp, *next;
+diff -rcP -x .* -x *.[ao] olinux-2.2.11/net/ipv4/tcp_ipv4.c linux-2.2.11/net/ipv4/tcp_ipv4.c
+*** olinux-2.2.11/net/ipv4/tcp_ipv4.c	Mon Aug  9 15:05:14 1999
+--- linux-2.2.11/net/ipv4/tcp_ipv4.c	Wed Aug 18 09:30:19 1999
+***************
+*** 174,180 ****
+  }
+  #endif
+  
+! static __inline__ void __tcp_inherit_port(struct sock *sk, struct sock *child)
+  {
+  	struct tcp_bind_bucket *tb = (struct tcp_bind_bucket *)sk->prev;
+  
+--- 174,180 ----
+  }
+  #endif
+  
+! __inline__ void __tcp_inherit_port(struct sock *sk, struct sock *child)
+  {
+  	struct tcp_bind_bucket *tb = (struct tcp_bind_bucket *)sk->prev;
+  
+***************
+*** 810,815 ****
+--- 810,821 ----
+  	th = (struct tcphdr*)(dp+(iph->ihl<<2));
+  
+  	sk = tcp_v4_lookup(iph->daddr, th->dest, iph->saddr, th->source, skb->dev->ifindex);
++ #ifdef CONFIG_TCP_ALTERNATE_STACK
++ 	if (sk == NULL && alternate_tcp_err) {
++ 		alternate_tcp_err(skb, dp, len);
++ 		return;
++ 	}
++ #endif
+  	if (sk == NULL || sk->state == TCP_TIME_WAIT) {
+  		icmp_statistics.IcmpInErrors++;
+  		return; 
+***************
+*** 1764,1769 ****
+--- 1770,1781 ----
+  	return 0;
+  
+  no_tcp_socket:
++ #ifdef CONFIG_TCP_ALTERNATE_STACK
++ 	if (alternate_tcp_rcv) {
++ 		tcp_statistics.TcpInSegs--; /* don't count it; let alternate_tcp_rcv count it */
++ 		return alternate_tcp_rcv(skb, len);
++ 	}
++ #endif
+  	tcp_v4_send_reset(skb);
+  
+  discard_it:
+***************
+*** 2018,2023 ****
+--- 2030,2075 ----
+  	0				/* highestinuse */
+  };
+  
++ 
++ /* Alternate TCP stack */
++ #ifdef CONFIG_TCP_ALTERNATE_STACK
++ struct proto *alternate_tcp_prot = 0;
++ int (*alternate_tcp_rcv)(struct sk_buff *skb, unsigned short len) = 0;
++ void (*alternate_tcp_err)(struct sk_buff *skb, unsigned char *dp, int len) = 0;
++ 
++ static __inline__ void __tcp_v4_hash_maybe_timewait(struct sock *sk)
++ {
++   if (sk->state == TCP_TIME_WAIT) {
++     struct sock **skp;
++     sk->hashent = tcp_sk_hashfn(sk);
++     skp = &tcp_established_hash[sk->hashent+(TCP_HTABLE_SIZE/2)];
++     if ((sk->next = *skp) != NULL)
++       (*skp)->pprev = &sk->next;
++     *skp = sk;
++     sk->pprev = skp;
++   } else
++     __tcp_v4_hash(sk);
++ }
++ 
++ /* must be called with interrupts disabled */
++ /* Steals `sk' from a subsidiary TCP implementation and installs it in the
++    current list of TCP implementations. It must already be installed in
++    tcp_bound_hash however. */
++ void
++ tcp_v4_steal_sock(struct sock *sk)
++ {
++   struct tcp_opt *tp = &(sk->tp_pinfo.af_tcp);
++   tp->retransmit_timer.function = &tcp_retransmit_timer;
++   tp->delack_timer.function = &tcp_delack_timer;
++   tp->probe_timer.function = &tcp_probe_timer;
++   sk->prot = &tcp_prot;
++   sk->write_space = tcp_write_space;
++   sk->backlog_rcv = sk->prot->backlog_rcv;
++   sk->tp_pinfo.af_tcp.af_specific = &ipv4_specific;
++   __tcp_v4_hash_maybe_timewait(sk);
++   __add_to_prot_sklist(sk);
++ }
++ #endif
+  
+  
+  __initfunc(void tcp_v4_init(struct net_proto_family *ops))
+diff -rcP -x .* -x *.[ao] olinux-2.2.11/net/netsyms.c linux-2.2.11/net/netsyms.c
+*** olinux-2.2.11/net/netsyms.c	Mon Aug  9 15:05:14 1999
+--- linux-2.2.11/net/netsyms.c	Wed Aug 18 09:38:00 1999
+***************
+*** 63,69 ****
+--- 63,89 ----
+  extern int udp_port_rover;
+  #endif
+  
++ #ifdef CONFIG_TCP_ALTERNATE_STACK
++ extern int tcp_tw_death_row_slot;
++ extern struct tcp_func ipv4_specific;
++ extern int get__netinfo(struct proto *, char *, int, char **, off_t, int);
++ 
++ extern int sysctl_ip_dynaddr;
++ extern int sysctl_tcp_fin_timeout;
++ extern int sysctl_tcp_keepalive_time;
++ extern int sysctl_tcp_keepalive_probes;
++ extern int sysctl_tcp_max_ka_probes;
++ extern int sysctl_tcp_retries1;
++ extern int sysctl_tcp_retries2;
++ extern int sysctl_tcp_rfc1337;
++ extern int sysctl_tcp_sack;
++ extern int sysctl_tcp_stdurg;
++ extern int sysctl_tcp_syncookies;
++ extern int sysctl_tcp_syn_retries;
++ extern int sysctl_tcp_timestamps;
++ extern int sysctl_tcp_window_scaling;
+  #endif
++ #endif /* CONFIG_INET */
+  
+  #include <linux/rtnetlink.h>
+  
+***************
+*** 259,265 ****
+  EXPORT_SYMBOL(ipv6_addr_type);
+  EXPORT_SYMBOL(icmpv6_send);
+  #endif
+! #ifdef CONFIG_IPV6_MODULE
+  /* inet functions common to v4 and v6 */
+  EXPORT_SYMBOL(inet_stream_ops);
+  EXPORT_SYMBOL(inet_release);
+--- 279,285 ----
+  EXPORT_SYMBOL(ipv6_addr_type);
+  EXPORT_SYMBOL(icmpv6_send);
+  #endif
+! #if defined(CONFIG_IPV6_MODULE) || defined(CONFIG_TCP_ALTERNATE_STACK)
+  /* inet functions common to v4 and v6 */
+  EXPORT_SYMBOL(inet_stream_ops);
+  EXPORT_SYMBOL(inet_release);
+***************
+*** 320,325 ****
+--- 340,346 ----
+  EXPORT_SYMBOL(tcp_bucket_create);
+  EXPORT_SYMBOL(__tcp_put_port);
+  EXPORT_SYMBOL(tcp_put_port);
++ EXPORT_SYMBOL(__tcp_inherit_port);
+  EXPORT_SYMBOL(tcp_inherit_port);
+  EXPORT_SYMBOL(tcp_v4_syn_recv_sock);
+  EXPORT_SYMBOL(tcp_v4_do_rcv);
+***************
+*** 399,404 ****
+--- 420,465 ----
+  EXPORT_SYMBOL(arp_tbl);
+  EXPORT_SYMBOL(arp_find);
+  
++ #ifdef CONFIG_TCP_ALTERNATE_STACK
++ EXPORT_SYMBOL(alternate_tcp_prot);
++ EXPORT_SYMBOL(alternate_tcp_rcv);
++ EXPORT_SYMBOL(alternate_tcp_err);
++ 
++ /* export sysctls so alternate TCP stack can use them */
++ EXPORT_SYMBOL(sysctl_ip_dynaddr);
++ EXPORT_SYMBOL(sysctl_tcp_fin_timeout);
++ EXPORT_SYMBOL(sysctl_tcp_keepalive_time);
++ EXPORT_SYMBOL(sysctl_tcp_keepalive_probes);
++ EXPORT_SYMBOL(sysctl_tcp_max_ka_probes);
++ EXPORT_SYMBOL(sysctl_tcp_retries1);
++ EXPORT_SYMBOL(sysctl_tcp_retries2);
++ EXPORT_SYMBOL(sysctl_tcp_rfc1337);
++ EXPORT_SYMBOL(sysctl_tcp_sack);
++ EXPORT_SYMBOL(sysctl_tcp_stdurg);
++ EXPORT_SYMBOL(sysctl_tcp_syncookies);
++ EXPORT_SYMBOL(sysctl_tcp_syn_retries);
++ EXPORT_SYMBOL(sysctl_tcp_timestamps);
++ EXPORT_SYMBOL(sysctl_tcp_window_scaling);
++ 
++ /* export cache allocators */
++ EXPORT_SYMBOL(tcp_bucket_cachep);
++ EXPORT_SYMBOL(tcp_timewait_cachep);
++ 
++ /* export stuff we need */
++ EXPORT_SYMBOL(csum_partial_copy_generic);
++ EXPORT_SYMBOL(get__netinfo);
++ EXPORT_SYMBOL(icmp_statistics);
++ EXPORT_SYMBOL(ip_setsockopt);
++ EXPORT_SYMBOL(ip_getsockopt);
++ EXPORT_SYMBOL(ip_build_and_send_pkt);
++ EXPORT_SYMBOL(ip_send_reply);
++ EXPORT_SYMBOL(ip_rt_update_pmtu);
++ EXPORT_SYMBOL(ip_options_echo);
++ EXPORT_SYMBOL(icmp_err_convert);
++ 
++ /* export new function */
++ EXPORT_SYMBOL(tcp_v4_steal_sock);
++ #endif
+  #endif  /* CONFIG_INET */
+  
+  #if	defined(CONFIG_ULTRA)	||	defined(CONFIG_WD80x3)		|| \

@@ -1,0 +1,171 @@
+#ifndef INTRFACE_PC
+#define INTRFACE_PC
+#define ISS_SERVER	481
+#define ISS_CLIENT	1234
+
+module Tcp-Interface has .TCB, .Socket, .Output, .Input, .Segment, .Timeout, Headers.TCP {
+  
+  static init(c :> int) ::=
+    let iss :> int in {
+        tcp_init(c);
+        iss = ISS_SERVER;
+      }, TCB.global-iss = iss, TCB.initialize
+    end;
+
+  static quick-timeout ::= Timeout().quick;
+  static fast-timeout ::= Timeout().fast;
+  static slow-timeout ::= Timeout().slow;
+  
+  static poll ::=
+    false;
+    /*
+    let seg :> *Segment, tcb :> *TCB in
+      { 
+	seg = tcp_poll(&tcb);
+      },
+      seg ==> Input.run(seg, tcb)
+    end;
+    */
+
+  static find-tcb(seg :> *Segment) :> *TCB ::= 
+    let th = seg->_tcp_header, tcb :> *TCB in {
+      tcb = tcb_demultiplex(th);
+    }, tcb
+    end;
+    
+  static refuse_connection(seg :> *Segment) ::=
+    { PDEBUG("refusing connection.\n"); }, true;
+
+
+  static rcv(seg :> *Segment) ::=
+    let tcb :> *TCB in 
+      tcb = find-tcb(seg),
+
+    { 
+	//prolac_sock_snd_len = tcb->_socket->snd_len;
+
+      //atomic_inc(&skb_count);
+      PDEBUG("INCOMING segment, in host order. (skb_count = %d)\n", skb_count);
+      //print_iphdr((void *)seg->_ip_header);
+      print_tcphdr((void *)seg->_tcp_header, (void *)seg->_ip_header,
+		   PRINT_TCPHDR_RCV, tcb?tcb->irs:0, tcb?tcb->iss:0);
+      seg->_ip_header->p = 0x6;
+    }
+  
+      tcb ==> (Input.run(seg, tcb) /*, 
+	       {prolac_sock_snd_len -= tcb->_socket->snd_len;}*/)
+      ||| (refuse-connection(seg), 
+	  /*{ printk("Refused connection. Freeing...\n"); }, */
+	  seg->free-read)
+    end;
+  
+  static connect-wait(tcb :> *TCB) ::= 
+    poll,
+    (tcb->snd_una > tcb->iss ==> true)
+    ||| (tcb->closed ==> false)
+    ||| connect-wait(tcb);
+
+
+  // New version of connect, to work with connect-poll
+  static connect(addr :> *void) :> *Socket ::= 
+    let local-port :> ushort, rport :> ushort, daddr :> ulong in
+      { rport = __ntohs(((struct sockaddr_in *)addr)->sin_port);
+        daddr = ((struct sockaddr_in *)addr)->sin_addr.s_addr;
+	get_random_bytes(&local_port, sizeof(local_port));
+        PDEBUG("prolac: connect called with addr = %x, port = %d\n", daddr, rport);
+      },
+      let sock = Socket.new-active-open(local-port, rport) in
+	(sock ==> sock->tcb->daddr = daddr,
+		  sock->tcb->enter-syn-sent,
+		  {PDEBUG("intrface.pc:connect\n");}
+		  Output(sock->tcb).do), // Output will send the SYN
+	sock
+      end
+    end;
+
+  static connect-poll(sock :> *Socket) ::=
+    let tcb = sock->tcb in
+      (tcb->snd_una > tcb->iss ==> true)
+      ||| false,
+    end;
+
+
+  static listen(myport :> int) :> *Socket ::=
+    let sock = Socket.new-listen(myport) in
+      let n = sock->tcb->state-name in { n; } end,
+      sock->tcb->enter-listen,
+      sock
+    end;
+  
+  static accept-wait(sock :> *Socket) :> *Socket ::=
+    poll,
+    let newsock = sock->queue in
+      ((newsock && (newsock->tcb->established || newsock->tcb->close-wait))
+       ==> newsock)
+      ||| accept-wait(sock)
+    end;
+  
+  static accept(listener :> *Socket) :> *Socket ::= 
+#ifdef PRINT
+    listener->tcb->print,
+#endif
+    accept-wait(listener);
+  
+  static write-wait(tcb :> * TCB) :> int ::=
+    poll,
+    (tcb->send-idle ==> 0)
+    ||| write-wait(tcb);
+  
+  static write(sock :> *Socket, d :> * char, n :> int) :> int ::=
+    let b =sock->user-write(d, n) in
+      Output(sock->tcb).do,
+      b
+    end;
+
+  static do-read(sock :> *Socket, d :> *char, n :> int, got :> int) :> int ::=
+    (n <= 0 ==> got) 
+    ||| let r = sock->user-read(d, n) in
+	   Output(sock->tcb).do,
+	   r
+         end;
+
+  static read(sock :> *Socket, d :> *char, n :> int) :> int ::=
+    (sock->rcv-len > 0 ==> do-read(sock, d, n, 0))
+    ||| (sock->tcb->almost-dead ==> -1)
+    ||| 0;
+
+  static read-poll(sock :> *Socket) :> int ::=
+    (sock->rcv-len > 0 ==> sock->rcv-len)
+    ||| (sock->tcb->almost-dead ==> -1)
+    ||| 0;
+  
+  static close-poll(sock :> *Socket) ::= 
+    sock->tcb->time-wait ==> true
+    ||| sock->tcb->closed ==> true
+    ||| false;
+  
+  static close(sock :> *Socket) ::= 
+    sock->user-close,
+    {PDEBUG("intrface.pc:close\n");}
+    Output(sock->tcb).do,
+    0;
+  
+  static wrapup-wait(tcb :> *TCB) ::=
+    (tcb->closed ==> tcb->free)
+    ||| (poll, wrapup-wait(tcb));
+  
+  static wrapup(sock :> *Socket) ::=
+    sock->tcb->print, /*tcb->print-stat,*/
+    wrapup-wait(sock->tcb);
+
+  static shutdown ::=
+    TCB.free-all(TCB.first-tcb);
+  
+  field q :> int;
+  f :> int ::=
+    q++;
+  
+};
+
+export Tcp-Interface.f;
+#endif

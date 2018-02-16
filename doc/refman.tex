@@ -1,0 +1,2717 @@
+\documentclass[twocolumn]{article}
+
+%\renewcommand{\rmdefault}{NewCaledonia}
+\newcommand{\prolacdefault}{cmtt}
+\usepackage{prolac}
+
+\documentmarker
+\makeatletter
+
+\documentsize{10}
+\setcounter{secnumdepth}{4}
+\c@tocdepth=2
+
+\setlength\oddsidemargin{-.1in}
+\setlength\evensidemargin{-.3in}
+\setlength\columnsep{.2in}
+\setlength\textwidth{6.89in}
+\setlength\topmargin{-.73in}
+\setlength\textheight{8.86in}
+\setlength\parindent{1em}
+\setlength\leftmargini{2em}
+\setcounter{footnote}{0}
+\clubpenalty=150
+\tolerance=9999
+\pretolerance=100
+
+% Make special mini-toc always go to refman.toc
+\def\@starttoc#1{%
+  \begingroup
+    \makeatletter
+    \@input{refman.toc}%
+    \if@filesw
+      \expandafter\newwrite\csname tf@edtoc\endcsname
+      \immediate\openout \csname tf@edtoc\endcsname refman.toc\relax
+    \fi
+    \@nobreakfalse
+  \endgroup}
+\def\addcontentsline#1#2#3{%
+  \addtocontents{edtoc}{\protect\contentsline{#2}{#3}{\thepage}}}%
+
+\def\ed@toc@line#1#2#3#4#5#6{%
+  \begingroup
+    \setlength\@tempdima{2.3em}%
+    \leftskip\z@\rightskip\@pnumwidth\@plus4em\parfillskip-\@pnumwidth
+    \parindent\z@ \leavevmode #2%
+    \hb@xt@ #1{\hfil}%
+    \setbox\@tempboxa\hbox{#3}%
+    \advance\@tempdima by-\wd\@tempboxa %\showthe\wd\@tempboxa
+    \advance\@tempdima by-#1%
+    \advance\leftskip \@tempdima \null\nobreak\hskip -\leftskip
+    \box\@tempboxa#4\nobreak#5 \nobreak\hb@xt@\@pnumwidth{\hss #6}\par
+  \endgroup}
+\def\@pnumwidth{1em}%
+\renewcommand*\l@section[2]{%
+  \ifvmode\unskip\fi\addpenalty\z@
+  \vskip0.5em\@plus\p@
+  \next\let\next\relax
+  \ed@toc@line{\z@}{\bfseries}{\S}{#1}{\leaders\hbox{\mdseries$\m@th
+        \mkern \@dotsep mu\hbox{.}\mkern \@dotsep
+        mu$}\hfill}{#2}%
+  \nobreak\vskip0.5em\@plus\p@
+  \relax}
+\renewcommand*\l@subsection[2]{%
+  \ed@toc@line{\z@}{}{}{#1}{\hfil}{#2}}%
+\renewcommand*\l@table[2]{}
+
+\def\edtableofcontents{%
+ \begingroup
+ \splittopskip\z@
+ \splitmaxdepth\z@
+ \hyphenpenalty\@M
+ \def\next{\vskip-0.5em}%
+ \setbox0\vbox{\hsize152pt\vskip0pt\@starttoc{toc}\vskip0pt plus1fil}%
+ \parindent\z@
+ \leftskip\z@
+ \dimen0=0.37\ht0
+ \leavevmode
+ \hbox{\vbox to\dimen0{\vsplit0 to0.34\ht0\vfil}}\hfil
+ \hbox{\vbox to\dimen0{\vsplit0 to0.5\ht0\vfil}}\hfil
+ \hbox{\vbox to\dimen0{\box0\vfil}}\hfil
+ \parfillskip\z@
+ \par
+ \endgroup
+}
+
+\renewcommand{\thetable}{\thesection.\arabic{table}}
+
+\ifincluded
+ \let\orig@seccntformat\@seccntformat
+ \def\@seccntformat#1{\protect\@gobbletwo\orig@seccntformat{#1}}%
+ \def\numberline#1{\hb@xt@\@tempdima{\@gobbletwo#1\hfil}}
+ \def\@gobblefirstoftwo#1#2{\@gobbletwo#1}%
+ \def\ref#1{\expandafter\@setref\csname r@#1\endcsname\@gobblefirstoftwo{#1}}
+ \def\fnum@table{\tablename~\protected@edef\next{\protect\@gobbletwo\thetable}\next}
+\fi
+
+\setlength{\skip\footins}{10pt plus50pt}
+\footnotesep\z@
+\setlength{\textfloatsep}{5pt plus10pt minus5pt}
+
+\makeatother
+\frenchspacing
+\raggedbottom
+\begindocument
+
+%%%%%
+% Title
+%%
+
+\twocolumn[\begin{center}
+{\ifincluded\includemanualtitle\fi}%
+{\huge\textbf{PROLAC LANGUAGE REFERENCE MANUAL}\break}%
+{\large
+Revised version of August 29, 1999\par}%
+\vskip5pt
+\end{center}
+\edtableofcontents
+\ifincluded\vskip-30pt\fi]
+
+%%%%%
+% Syntax
+%%
+
+\section{Introduction}
+
+This is a draft of the Prolac language reference manual. Prolac is an
+object-oriented language designed for creating efficient but readable
+protocol implementations. This draft attempts to be definitive, but does
+not always define Prolac semantics precisely.
+
+A Prolac specification is stored in a single file; the Prolac compiler
+reads the file, analyzes it, and produces two output files in the C
+language. The first output file is a header file containing C structure
+definitions corresponding to Prolac structures; the second is a C source
+file containing definitions for any exported Prolac
+methods~(\rf{man:export}). Prolac is completely order-independent: anything
+can be used before it is declared or defined.
+
+In the rest of this manual, the largest Prolac structures, modules, are
+discussed first, while types and expressions are saved for last.
+
+This manual is copyright Eddie Kohler 1997--1999. The most current version
+of this manual, as well as technical papers on Prolac and source for the
+Prolac compiler, is available from
+\prol{http://www.pdos.lcs.mit.edu/prolac/}.
+
+\subsection{Terminology}
+
+A \defemph{name} is either a \defemph{simple name}---that is, an
+identifier---or a \defemph{qualified name,} which is a member expression
+`\prol{X.n}'~(\rf{man:member-op}) where `\prol{X}' is a name and `\prol{n}'
+is an identifier. (Note that a pointer-to-member expression `\prol{X->n}'
+is not a name.) The keywords \pg{all}, \pg{allstatic} and \pg{constructor}
+can be used as name components in some contexts. Specifically, \pg{all} and
+\pg{allstatic} are allowed in module namespace
+operators~(\rf{man:name-mod-op}) and \pg{constructor} is allowed as a
+method name~(\rf{man:ctor}).
+
+A \defemph{feature} is simply something that has a name.
+Modules~(\rf{man:mod}), namespaces~(\rf{man:namesp}),
+methods~(\rf{man:meth}), fields~(\rf{man:fields}), and
+exceptions~(\rf{man:except}) are features.
+
+
+\section{Lexical analysis}
+\label{man:syntax}
+
+Prolac programs are stored as a sequence of ASCII characters. As in C,
+whitespace---spaces, horizontal and vertical tabs, formfeeds, carriage
+returns, newlines, and comments---is ignored except when it separates other
+tokens. Prolac supports both C's comment syntax `\prol{/*~...~*/}' and
+C++'s `\prol{//~...~\v{newline}}'.
+
+\subsection{Identifiers}
+\label{man:identhyphens}
+
+An \defemph{identifier} is an arbitrarily long sequence of letters, digits,
+underscores, and hyphens `\prol{-}'. Identifiers must start with a letter
+or underscore; an identifier cannot contain two consecutive hyphens or end
+in a hyphen. Identifiers which differ only in substituting hyphens for
+underscores and vice versa are considered identical; thus,
+`\prol{one-thing}' and `\prol{one_thing}' are the same identifier. (In
+generated C code, Prolac substitutes underscores for all hyphens.)
+
+Some examples:
+%
+\begin{prolacindent}
+\begin{tabular}{@{}l@{}}
+\prol{a-pretty-long-identifier}	~~is one identifier \\
+\prol{-23x_x-23} ~~$\equiv$~~ `\prol{-~~23~~x_x-23}' ~~$\equiv$~~
+`\prol{-~~23~~x_x_23}' \\
+\prol{x--} ~~$\equiv$~~ `\prol{x~~--}' \\
+\end{tabular}
+\end{prolacindent}
+
+Identifiers containing double underscores `\prol{__}' or an equivalent
+(`\prol{-_}', `\prol{_-}') are reserved for the implementation.
+
+
+\subsection{Keywords}
+
+The following identifiers are reserved for use as keywords, and may not be
+used otherwise:
+%
+\begin{center}
+\begin{tabular}{@{}p{.75in}p{.6in}p{.6in}p{.6in}@{}}
+\pg{all}		& \pg{exception}	& \pg{long}		& \pg{static} \\
+\pg{allstatic}		& \pg{export}		& \pg{module}		& \pg{super} \\
+\pg{bool}		& \pg{false}		& \pg{noinline}		& \pg{then} \\
+\pg{catch}		& \pg{field}		& \pg{notusing}		& \pg{true} \\
+\pg{char}		& \pg{has}		& \pg{outline}		& \pg{uchar} \\
+\pg{class}		& \pg{hide}		& \pg{pathinline}	& \pg{uint} \\
+\pg{constructor}	& \pg{if}		& \pg{rename}		& \pg{ulong} \\
+\pg{defaultinline}	& \pg{in}		& \pg{self}		& \pg{ushort} \\
+\pg{else}		& \pg{inline}		& \pg{seqint}		& \pg{using} \\
+\pg{elseif}		& \pg{int}		& \pg{short}		& \pg{void} \\
+\pg{end}		& \pg{let}		& \pg{show} \\
+\end{tabular}
+\end{center}
+
+\noindent These single characters serve as operators or punctuation:
+%
+\begin{center}
+\begin{tabular}{llllllllllllll}
+\prol{!} & \prol{\%} & \prol{\^} & \prol{&} & \prol{*} & \prol{(} & \prol{)} & \prol{-} & \prol{+} & \prol{=} & \prol{\{} & \prol{\}} &
+\prol{|} & \prol{\~} \\
+\prol{[} & \prol{]} & \prol{\prolbackslash} & \prol{;} & \prol{'} & \prol{:} & \prol{"} & \prol{<} & \prol{>} & \prol{?} &
+\prol{,} & \prol{.} & \prol{/} \\
+\end{tabular}
+\end{center}
+
+\noindent These multi-character sequences are also single tokens:
+%
+\begin{center}
+\begin{tabular}{lllllllll}
+\prol{->} & \prol{++} & \prol{--} & \prol{:>} & \prol{<<} & \prol{>>} & \prol{<=} & \prol{>=} & \prol{==} \\
+\prol{!=} & \prol{&&} & \prol{||} & \prol{+=} & \prol{-=} & \prol{*=} & \prol{/=} & \prol{\%=}& \prol{\^=} \\
+\prol{&=} & \prol{|=} & \prol{<<=} & \prol{>>=} & \prol{==>} & \prol{|||} & \prol{::=} & \prol{\%\{} & \prol{\%\}} \\
+\end{tabular}
+\end{center}
+
+
+\subsection{Numbers and literals}
+
+Prolac's definitions for number, string, and character literals are the
+same as C's. However, Prolac does not support floating-point types or
+values, so any floating-point literal encountered is an error. The current
+Prolac compiler only has partial support for string literals.
+
+
+\subsection{Preprocessing}
+
+The Prolac compiler has some features to facilitate preprocessing Prolac
+files with \unixcmd{cpp}, the C preprocessor. In particular, it understands
+`\prol{\#~\v{line}}' directives, and will generate error messages with
+appropriate line numbers. The compiler also generates `\prol{\#~\v{line}}'
+directives in its C output files.
+
+
+\subsection{Including C code}
+
+C code may be included in a Prolac file in two ways. First, \defemph{C
+blocks}~(\rf{man:cblock-op}) occur within method bodies, where they specify
+code to run during the method's execution. An open brace `\prol{\{}' within
+an expression introduces a C block; to read the C block, the lexer copies
+characters without interpretation, respecting nested braces, until the next
+unbalanced `\prol{\}}' character not in a string or character literal or a
+comment. C blocks can refer to some Prolac objects using Prolac names;
+see~\rf{man:cblock-op} for details.
+
+The `\prol{\%\{}' and `\prol{\%\}}' operators specify \defemph{support C
+code} not relating to any method; support C code is passed unchanged to the
+output file at file scope. Support C code cannot refer to Prolac objects
+using Prolac names.
+
+`\prol{\%\{}' can occur wherever a definition is expected; the lexer then
+copies characters without interpretation until the next `\prol{\%\}}'
+sequence not in a string or character literal or a comment. Note that
+support C code can therefore contain unbalanced braces.
+
+Support C code occurring in the input file before any actual Prolac code is
+collected, in order of definition, and placed in the output C source file
+before any Prolac-generated code. All other support C code is collected in
+order of definition and placed at the very end of the output source file.
+
+%%%%%
+% Modules
+%%
+
+\section{Modules}
+\label{man:mod}
+
+\defemph{Modules} are Prolac's basic means of organizing programs. Modules
+contain methods~(\rf{man:meth}), which represent computation, and
+fields~(\rf{man:fields}), which represent data. Each module is also a
+namespace~(\rf{man:namesp}). A module is wholly self-contained; it must
+explicitly import other modules if it wants to refer to them
+(\rf{man:mod-import}). Modules can be subtypes of other modules
+(\rf{man:mod-super}). A module can have a special method which initializes
+objects of its type~(\rf{man:ctor}). Module definitions cannot be nested.
+
+A module definition looks like this:
+%
+\begin{prolac}
+module \v{name} [:> \v{parents...}] [has \v{imports...}] \{
+   ...\v{definitions}...
+\}
+\end{prolac}
+%
+The reserved word \prol{class} is a synonym for \prol{module}.
+
+
+\subsection{The module header}
+\label{man:mod-header}
+
+The \defemph{module header} defines the interface between a module and the
+rest of the program. The interior of a module can only refer to other
+modules if they have been explicitly specified in the module's header (or a
+supertype's header).
+
+The module header has two parts, \v{parents} and \v{imports}. Each part is
+a comma-separated list of module expressions, where a module expression is
+a module name possibly modified by module operators~(\rf{man:mod-op}).
+
+The rightmost components of all parent and import names must be distinct.
+These name components can be used within the module to refer to the parents
+and imports. Thus, this example is illegal:
+%
+\begin{prolac}
+Alice \{
+  module M \{ ... \}
+\}
+Bob \{
+  module M \{ ... \}
+\}
+module N has Alice.M, Bob.M \{
+  \cmt{error: two definitions for `\prol{M}'}
+\}
+\end{prolac}
+%
+Use module equations~(\rf{man:mod-equate}) to get around this restriction.
+
+
+\subsection{Supertypes}
+\label{man:mod-super}
+
+A module may have one \defemph{parent}, which is another module. The
+parent, if any, must be explicitly listed in the module's header. This
+parent is one of the module's \defemph{supertypes}. The supertype relation
+is the transitive closure of the parent relation: if \prol{A} is a
+supertype of \prol{B} and \prol{B} is \prol{C}'s parent, then \prol{A} is a
+supertype of \prol{C}.
+
+A module inherits its supertypes' features---their imports, fields,
+namespaces, and methods. The parent's features are generally available
+without qualification under their own names, as if the module's definition
+was inserted into the parent's definition;
+see~\rf{man:mod-name-original-super} for a detailed description of how
+parents' namespaces are combined into a module's namespace.
+
+If \prol{P} is a supertype of \prol{M}, then a pointer to \prol{M} may be
+used wherever a pointer to \prol{P} is expected; or, in notation,
+\prol{*M~:>~*P}~(\rf{man:mod-type}). (Unlike C++, actual objects of type
+\prol{M} cannot be used where objects of type \prol{P} are expected.)
+
+A module can \emph{override} some of its supertypes' methods. On an object
+of that module type, the overriding definitions will be used whenever the
+parents' overridden methods are called. This process, called \emph{dynamic
+dispatch}, is described in~\rf{man:override-meth}.
+
+It is not an error to explicitly mention another parent's supertype as a
+parent. This is not actually multiple inheritance; only one copy of the
+supertype in question is inherited. For example, this is legal:
+\begin{prolac}
+module M \{ ... \}
+module N :> M \{ ... \}
+module O :> M, N \{ ... \}
+\end{prolac}
+This can be useful to redefine some of \prol{M}'s module operators---for
+example, its inline levels~(\rf{man:mod-inline}).
+
+
+\subsection{Imports}
+\label{man:mod-import}
+
+If code inside a module \prol{M} must refer to another module \prol{I} that
+isn't a supertype of \prol{M}, then \prol{M} must list \prol{I} as an
+\defemph{import} in the \prol{has} clause of its module header. Imports'
+names, unlike supertypes' names, are not copied into a module's namespace;
+you must use qualified names to refer to features in an import (but
+see~\rf{man:implicit-meth}). If \prol{M} imports \prol{I}, it is not
+necessarily true that \prol{M~:>~I}.
+
+
+\subsection{Module operators}
+\label{man:mod-op}
+
+Prolac has a powerful collection of \defemph{module operators}, which are
+operators that act on modules instead of values. The particular operators
+are described later in this manual; there are operators that control a
+module's namespace (\prol{hide}, \prol{show}, and
+\prol{rename},~\rf{man:name-mod-op}), operators that control how implicit
+methods~(\rf{man:implicit-meth}) are found (\prol{using} and
+\prol{notusing},~\rf{man:impmeth-mod-op}), and an operator controlling how
+methods are inlined (\prol{inline},~\rf{man:mod-inline}). A module operator
+expression has a module value, so module operators may be used anywhere a
+module is expected.
+
+Each module operator described in this manual changes a module's secondary
+features (its namespace, its exported methods, its preferred inline levels)
+without affecting its primary features (its rule complement, its
+signatures, its supertypes). In fact, two module expressions differing only
+in module operators have the same type.
+
+
+\subsubsection{Module equations}
+\label{man:mod-equate}
+
+A \defemph{module equation} defines a new name for an old module. The
+syntax is:
+\begin{prolac}
+module \v{new-module} ::= 
+    \v{old-module} [\v{module operators}...] ;
+\end{prolac}
+Other modules can then refer to \vprol{new-module} as an abbreviation for
+`\prol{\v{old-module} [\v{module operators}...]}'. A module equation does
+not define a new type.
+
+\subsubsection{After-module operators}
+\label{man:after-mod-op}
+
+A module definition can specify operators that will be applied to the
+module by default. The syntax is to write module operators directly after
+the module definition's closing brace. For example:
+%
+\begin{prolac}
+module M \{
+  public-method ::= ...;
+  private-method ::= ...;
+\} hide private-method;
+\end{prolac}
+
+A module definition with after-module operators `\prol{module M \{~...~\}
+\v{operators}}' is effectively equivalent to this definition with a module
+equation:
+\begin{prolac}
+module __M \{ ... \}
+module M ::= __M \v{operators};
+\end{prolac}
+
+
+%%%%%
+% Namespaces
+%%
+
+\section{Namespaces}
+\label{man:namesp}
+
+A \defemph{namespace} maps names to features. The most common examples of
+namespaces in Prolac are modules---each module defines a namespace. The
+programmer can also create \defemph{explicit namespaces,} either outside
+all modules (to organize modules into groups) or within a module (to
+organize methods into groups). An explicit namespace is created by writing
+the name of the namespace followed by an open brace `\prol{\{}':
+%
+\begin{prolac}
+\v{namespace-name} \{
+  ...\v{definitions}...
+\}
+\end{prolac}
+
+Namespaces may be nested---a namespace may have a \defemph{parent
+namespace} which is used during name lookup. Most namespaces are open,
+meaning you can define a namespace in parts through several definitions.
+(Module namespaces are not open: each module namespace is defined in
+exactly one place.)
+
+
+\subsection{Defining names}
+\label{man:define-name}
+
+Every feature (module, namespace, method, field, and exception) is defined
+in a namespace using a name. That \defemph{defining name} may be either
+simple or qualified. If it is simple, the feature is simply added to the
+current namespace under that name. A definition with a qualified name
+`\prol{\v{n1}.\thinspace$\cdots$\thinspace.\v{nk} ::= \v{F}}' is an
+abbreviation for a definition within nested namespaces, `\prol{\v{n1}~\{
+... \{~\v{nk}~::= \v{F}~\} ...~\}}'. Thus, these two examples are
+completely equivalent:
+\begin{prolac}
+module Package.M \{
+  namespace.method ::= ...;
+\}
+Package \{
+  module M \{
+    namespace \{
+      method ::= ...;
+    \}
+  \}
+\}
+\end{prolac}
+Because namespaces are open, the intermediate namespaces created by such a
+definition can be extended by other definitions.
+
+It is an error to define two features in the same namespace with the same
+name (but see \rf{man:mod-name-original} and \rf{man:override-meth} for
+information on method overriding). For example:
+\begin{prolac}
+module M has D \{
+  D ::= ...;   \cmt{error: `\prol{D}' redefined}
+  namespace.f ::= ...;
+  namespace \{
+    f ::= ...;   \cmt{error: `\prol{namespace.f}' redefined}
+  \}
+\}
+\end{prolac}
+
+
+\subsection{Name lookup}
+\label{man:lookup-name}
+
+A recursive algorithm is used to look up a name \vprol{N} in a namespace
+\vprol{S}. This happens when a name is used (for example, in an expression).
+
+If \vprol{N} is a simple name \vprol{n}, then Prolac searches for \vprol{n}
+in \vprol{S}, then in \vprol{S}'s parent, then its grandparent, and so on;
+the first definition found is used. If no definition is found, the lookup
+fails.
+
+If \vprol{N} is a qualified name `\prol{\v{Nsub}.\v{n}}', Prolac first uses
+this algorithm recursively to look up the name \vprol{Nsub} in \vprol{S}.
+If the result is a namespace \vprol{S2}, then Prolac searches for \vprol{n}
+in \vprol{S2} (but not its parents). If no result is found, or the original
+search failed or didn't produce a namespace, then the lookup fails. This
+algorithm is described in more detail in~\rf{man:member-op}.
+
+
+\subsection{Global names}
+\label{man:global-namesp}
+
+The direct member operator `\prol{.}' can also be used as a prefix; for
+example, `\prol{.M}' is a name. To look up a name `\prol{.\v{n}}', Prolac
+first finds the current \defemph{most global namespace,} \vprol{GS}. Within
+a module, the most global namespace is the module's top-level namespace;
+outside any module, it is the file namespace. Once it has found \vprol{GS},
+the name lookup proceeds as if the expression was `\prol{\v{GS}.\v{n}}'.
+This allows an expression in an inner namespace to refer to features in an
+outer namespace, whether or not their names have been reused in the inner
+namespace.
+
+
+\subsection{Namelike expressions}
+\label{man:lookup-name-notes}
+
+Prolac allows methods which take no arguments to be called without
+parentheses~(\rf{man:methcall-expr}). This means that an expression which
+looks like a name may actually contain method calls; for example:
+%
+\begin{prolac}
+module M1 \{
+  a.b.c.d.e ::= ...;
+  method ::= a.b.c.d.e;   \cmt{really just a name}
+\}
+module D \{
+  d.e ::= ...;
+\}
+module M2 has D \{
+  a :> M2 ::= ...;
+  b.c :> D ::= ...;
+  method ::= a.b.c.d.e;   \cmt{not just a name!}
+  \cmt{same as:}
+  method2 ::= let temp1 :> M2 = a() in
+     let temp2 :> D = temp1.b.c() in
+        temp3.d.e()
+     end end;
+\}
+\end{prolac}
+%
+These name-like expressions are not allowed where a name is
+required---here, `\prol{M2.a.b.c.d.e}' cannot be hidden by the \prol{hide}
+module operator.
+
+
+\subsection{Module namespaces}
+\label{man:mod-namesp}
+
+Every module is a namespace. Module namespaces have no parent---they are
+sealed off from surrounding namespaces. To illustrate:
+%
+\begin{prolac}
+module FindMe \{ ... \}
+N \{
+  module A :> FindMe ...   \cmt{finds \prol{FindMe}}
+\}
+module M \{
+  find-me-2 ::= ...;
+  inner \{
+    ... find-me-2 ...   \cmt{finds \prol{M.find-me-2}}
+  \}
+  ... FindMe ...   \cmt{does \emph{not} find \prol{FindMe}}
+\}
+\end{prolac}
+%
+The outside world---specifically, other modules---can only be reached
+through a module's parents and imports, which the module explicitly
+declares in its module header~(\rf{man:mod-header}).
+
+
+\subsubsection{Original and default namespaces}
+\label{man:mod-name-original}
+
+Each module \prol{M} has an \defemph{original namespace,} which is the
+namespace seen inside the definition of \prol{M}. It contains a union of
+\prol{M}'s parents' default namespaces, as well as every method, field, and
+nested namespace defined in \prol{M}, and every implicit
+method~(\rf{man:implicit-meth}) used by \prol{M}.
+
+Clients of \prol{M} (modules that subtype or import \prol{M}) see a
+different namespace, \prol{M}'s \defemph{default namespace.} This is equal
+to \prol{M}'s original namespace with all implicit methods hidden and any
+after-module operators~(\rf{man:after-mod-op}) applied. (Note that the
+after-module operators might \prol{show} some of the implicit methods
+again.)
+
+A module \prol{M}'s original namespace \prol{ONS} is created by merging all
+of \prol{M}'s parent's default namespaces, and then merging \prol{M}'s
+internal namespace into that. Finally, any implicit methods referred to in
+\prol{M} are stored in \prol{M}'s original namespace.
+
+Imports coming from \prol{M}'s parents are not merged into the original
+namespace. Name conflicts during the merging process are generally an
+error, unless the two names refer to the same feature (the same supertype
+or the same method).
+
+The remainder of this section describes this process in more precise
+detail. We start with an empty \prol{ONS} and add definitions to it from
+different sources.
+
+
+\subsubsection{Parents and imports}
+\label{man:mod-name-original-super}
+\label{man:mod-name-original-parimp}
+
+If \prol{M} has parent \prol{P}, we first create \prol{P}'s original
+namespace \prol{PNS}. We then copy all definitions from \prol{PNS} into
+\prol{ONS}, except for any of its parent or import definitions.
+
+Next, definitions for \prol{M}'s parent and any imports specified in its
+module header are added to \prol{ONS}. Each parent or import is defined
+using the identifier \prol{n} that is the rightmost component of its name.
+Thus, the original namespace for \prol{M} will have a feature named
+\prol{n} representing that parent or import.
+
+Any conflict between a feature \prol{FP}, inherited in the last stage from
+the parent \prol{P}, and \prol{FM}, a parent or import being added, is
+resolved silently in favor of \prol{FM} (that is, \prol{FM} replaces
+\prol{FP} in \prol{ONS}).
+
+
+\subsubsection{The internal namespace}
+\label{man:mod-name-original-int}
+
+Next, we merge \prol{M}'s \defemph{internal namespace,} \prol{INS}, into
+\prol{ONS}. A module's internal namespace contains the definitions the user
+provided inside the module body; in particular, changing a module's module
+header does not change its internal namespace. Any conflicts between
+features \prol{FM}, from \prol{ONS}, and \prol{FI}, from \prol{INS}, are
+resolved as follows:
+
+\begin{enumerate}
+\item If \prol{FM} and \prol{FI} are both methods, then \prol{FM} must have
+been inherited from some supertype. The method \prol{FI}
+\defemph{overrides} \prol{FM}; there is no namespace conflict, although
+there may be a type conflict. See~\rf{man:override-meth} for details on
+overriding.
+
+\item If \prol{FM} and \prol{FI} are both namespaces, the contents of
+\prol{FI} are merged into \prol{FM}. Conflicts found during the merge are
+resolved using this algorithm.
+
+\item Otherwise, an error is reported.
+\end{enumerate}
+
+
+\subsubsection{Implicit methods}
+\label{man:mod-name-original-implicit}
+
+Finally, all methods that were defined in \prol{M} have their bodies
+scanned for implicit methods. If a simple name in a method body cannot be
+found in \prol{ONS} or its appropriate subnamespaces
+(\rf{man:lookup-name}), then that name is an implicit
+method~(\rf{man:implicit-meth}) attached to some field or import, or it is
+undefined. For now, the name in question is defined in \prol{ONS} as a new
+implicit method. Its definition will be found, or an error reported if
+there is no definition, at a later stage of compilation.
+
+The resulting namespace \prol{ONS} is \prol{M}'s original namespace.
+
+
+\subsection{Namespace module operators}
+\label{man:name-mod-op}
+
+This section describes the three module operators which affect module
+namespaces, \prol{hide}, \prol{show}, and \prol{rename}. These operators
+are powerful tools for namespace manipulation and access control, but may
+cause confusion when overused, so be careful.
+
+
+\subsubsection{`\protect\protprol{hide}'}
+\label{man:mod-hide}
+
+The \prol{hide} operator hides some of a module's names. The left operand
+to \prol{hide} is a module expression; the right operand is a name, a
+comma-separated list of names, or `\prol{all}', which hides all of the
+module's names. Some examples:
+\begin{prolac}
+M hide internal-operation
+M hide (evil, kill, horrible.death, maim)
+M hide all
+\end{prolac}
+%
+The list of names must be enclosed in parentheses because of module
+operators' high precedence (\rf{man:op-prec}).
+
+You may also hide names that originate in a particular supertype. For
+example:
+%
+\begin{prolac}
+module A \{
+  x ::= ...;
+  y ::= ...;
+\}
+module B :> A \{
+  z ::= ...;
+\}
+... B hide A.x ...   \cmt{hides \prol{x} from \prol{B}'s namespace}
+... B hide A.all ...   \cmt{hides \prol{x} and \prol{y} from \prol{B}'s namespace}
+\end{prolac}
+%
+However, you cannot hide names inside an import.
+
+A group of names can be hidden with `\prol{hide "\v{pattern}"}', which
+hides all names that match the \vprol{pattern}. The usual shell
+metacharacters (\prol{*}, \prol{?}, and character classes \prol{[...]}) may
+be used within \vprol{pattern}. For example:
+%
+\begin{prolac}
+module A \{
+  f1 ::= ...;
+\};
+module B :> A \{
+  _a ::= ...;
+  _bbb ::= ...;
+  _c ::= ...;
+  f2 ::= ...;
+\} hide "_[a-b]*"   \cmt{hides \prol{_a} and \prol{_bbb}}
+   hide "B.f*";   \cmt{hides \prol{f2}, doesn't hide \prol{f1}}
+   \cmt{(\prol{f1} didn't originate in \prol{B})}
+\end{prolac}
+%
+If \prol{E} is name expression, then `\prol{M hide E}' is equivalent to
+`\prol{M hide "E1"}', where \prol{E1} is \prol{E} with all parentheses and
+whitespace removed. Metacharacters can only be used in the string form.
+
+
+\subsubsection{`\protect\protprol{show}'}
+\label{man:mod-show}
+
+\prol{Show} is the converse of \prol{hide}. \prol{Hide} makes names
+inaccessible; \prol{show} makes hidden names accessible again.
+
+The left argument to \prol{show} is a module expression, and the right
+argument is a list containing any number of names `\prol{n}' and name
+assignments `\prol{(new~=~old)}'. A single name `\prol{n}' is essentially
+equivalent to the name assignment `\prol{(n~=~n)}'.
+
+To evaluate a \prol{show} operator applied to a module \prol{M}, Prolac
+first looks up the old name, `\prol{old}', in \prol{M}'s original namespace
+(\rf{man:mod-name-original}). This name may be further qualified through
+\prol{M}'s supertypes. It is an error if the name is undefined.
+
+Prolac then evaluates the new name `\prol{new}' in \prol{M}'s
+\emph{current} namespace. This name must not be qualified through
+\prol{M}'s supertypes and imports.\footnote{A \prol{show} operation
+`\prol{M show A.n}', where there is only one name and it is qualified
+through an supertype or import, is not automatically an error; it is
+equivalent to `\prol{M show (n~=~A.n)}'.} It is an error if a feature with
+this name already exists; otherwise, Prolac binds \prol{F} to this name in
+the resulting module.
+
+It is an error to \prol{show} a module's constructor in a nested namespace
+or under a name other than \prol{constructor}.
+
+Note that \prol{show} can be used to make a single feature available under
+multiple names; for example:
+%
+\begin{prolac}
+module M \{
+  bad ::= ...;
+\}
+module M2 ::= M show (good = bad);
+\end{prolac}
+%
+Since \prol{M2.bad} and \prol{M2.good} are the \emph{same} feature---not
+two copies of a feature---overriding either one will effectively override
+them both.
+
+Because old names are looked up in the module's original namespace, hidden
+renamed features cannot be shown using the new name. This code will not
+work:
+%
+\begin{prolac}
+module M \{ r ::= ...; \}
+module N :>
+   M rename (r = weird)
+      hide weird  \cmt{OK}
+      show weird  \cmt{error: no \prol{weird} in \prol{M}}
+      show r  \cmt{OK}
+\{\}
+\end{prolac}
+
+The `\prol{show all}' operation is not yet implemented.
+
+
+%%%
+\subsubsection{`\protect\protprol{rename}'}
+\label{man:mod-rename}
+
+\prol{Rename} changes the name you use to access a feature. The left
+operand must be a module expression; the right operand must be a name
+assignment `\prol{(new~=~old)}' or a list of name assignments.
+
+`\prol{M rename (new~=~old)}' is equivalent to `\prol{M show~(new~=~old)
+hide~old}'. It is an error for either \prol{old} or \prol{new} to be
+qualified through supertypes or imports; for \prol{new} to conflict with an
+existing name in \prol{M}; or to attempt to rename a module's constructor.
+
+
+%%%%%
+% Methods
+%%
+
+\section{Methods}
+\label{man:meth}
+
+Prolac code is written in \defemph{methods}. Like functions in most
+programming languages, methods can take parameters and can return a value.
+Methods can call one another, possibly recursively.
+
+Methods can be \emph{static} or \emph{dynamic.} Static methods are
+equivalent to normal functions, while dynamic methods are called with an
+implicit reference to some object of module type.
+
+A module may provide new definitions for some of its supertypes' dynamic
+methods. This process is called \emph{overriding} the supertypes' methods. When
+an overridden method is called on an object with that module's type, the call
+will be handled by the new, overriding definition instead; this is called
+\emph{dynamic dispatch.}
+
+Each method has an \defemph{origin,} which is the module that provided the
+first, non-overriding definition for the method. Each method definition comes
+from some module, which is called its \defemph{actual.} For example:
+\begin{prolac}
+module M \{
+  f ::= ...;   \cmt{origin = \prol{M}, actual = \prol{M}}
+\}
+module N :> M \{
+  f ::= ...;   \cmt{override: origin = \prol{M}, actual = \prol{N}}
+\}
+\end{prolac}
+
+Method definitions look like this:
+%
+\begin{prolac}
+\v{method-name}(\v{parameters}...) :> \v{return-type} ::= \v{body} ;
+\end{prolac}
+%
+Each \prol{\v{parameter}} has the form \prol{\v{name} :> \v{type}}. If
+there are no parameters, the parentheses may be omitted. If the return type
+is \prol{void}~(\rf{man:void-type}), `\prol{:> \v{return-type}}' may be
+omitted. \vprol{Body} is an expression~(\rf{man:expr}); it may be omitted,
+in which case any call of the method will result in a run-time
+error.\footnote{Such a method can still be overridden, however.} Here is
+the shortest method definition possible:
+%
+\begin{prolac}
+x::=;
+\end{prolac}
+%
+Static method definitions have a \prol{static} keyword before the method
+name.
+
+Methods can be arbitrarily recursive, and the Prolac compiler turns
+tail-recursive methods into loops.
+
+
+\subsection{Static and dynamic methods}
+\label{man:statdyn-meth}
+
+A dynamic method defined in module \prol{M} is called with reference to some
+object whose type is either \prol{M} or one of \prol{M}'s subtypes. Within
+the method body, this object is called \prol{self}. Any dynamic method call
+must provide a value for \prol{self}; this is done with member operator
+syntax~(\rf{man:member-op}). The intuition is that the method is also a
+member of the module. For example:
+%
+\begin{prolac}
+module M \{
+  r ::= ...;
+\}
+module N has M \{
+  ... let m :> M in
+    m.r
+  end ...
+\}
+\end{prolac}
+%
+It is an error to refer to a dynamic method without reference to an object.
+This is a special case of the rules for static and dynamic context
+described in~\rf{man:member-op}.
+
+Within a dynamic method, `\prol{self.}' can be elided in field and method
+references. For example, these two method definitions are identical:
+%
+\begin{prolac}
+module M \{
+  method ::= ...;
+  field f :> ...;
+  d1 ::= self.method, self.f;
+  d2 ::= method, f;
+\}
+\end{prolac}
+%
+It is an error to refer to `\prol{self}', explicitly or implicity, in a
+static method.
+
+
+\subsection{Overriding and dynamic dispatch}
+\label{man:override-meth}
+
+A method declared with the same name as a supertype's method is an
+\emph{overriding method} (\rf{man:mod-name-original-int}). This section
+describes the semantics of overriding.
+
+Both dynamic and static methods may be overridden, but dynamic dispatch
+only occurs on dynamic methods.
+
+
+\subsubsection{Correctness}
+\label{man:contravariance}
+
+Every override of a static method \prol{MA} by a static method \prol{MB} is
+legal.
+
+An override of dynamic method \prol{MA} by dynamic method \prol{MB} is
+correct only if \prol{MB}'s signature---i.e., the number and types of its
+parameters and its return type---agree with \prol{MA}'s by the usual
+contravariance rule. Specifically:
+%
+\begin{enumerate}
+\item \prol{MA} and \prol{MB} must take the same number of parameters.
+
+\item For corresponding parameter types \prol{PA} and \prol{PB}, we must
+have \prol{PA~:>~PB}; that is, \prol{PA} and \prol{PB} are equal, or
+\prol{PB} is a supertype of \prol{PA}. Thus, the overriding parameters are
+the same as, or more general than, the overridden parameters. This ensures
+that any value passed as a parameter to \prol{MA} is also valid as a
+parameter to \prol{MB}.
+
+\item For the methods' return types \prol{TA} and \prol{TB}, we must have
+\prol{TB~:>~TA}; that is, \prol{TA} and \prol{TB} are equal, or \prol{TB}
+is a subtype of \prol{TA}. Thus, the overriding return type is the same as,
+or more specific than, the overridden return type.
+\end{enumerate}
+%
+It is an error to define an incorrect override.
+
+Every override of a static method by a dynamic method, or a dynamic method
+by a static method, is an error.
+
+
+\subsubsection{Method selection}
+
+The process of deciding which method definition to use for a given dynamic
+method call is called \emph{method selection.} Method selection depends on
+only one factor: the \emph{run-time type} of the object which will become
+the method's \prol{self}.
+
+In Prolac, an object of type \prol{M}, where \prol{M} is a module, can be
+used in place of any of \prol{M}'s supertypes. Therefore, an object's
+run-time type, or the actual type of the object used at run time, can
+differ from its static type, or the type used to declare the object.
+
+For objects of simple module type, the static type is always identical to
+the run-time type; Prolac's semantics are call-by-value, like C, rather
+than call-by-object, like Clu. An object's static and run-time types can
+differ only if the object is referenced through a
+pointer~(\rf{man:ptr-type}) or the object is \prol{self}. (Unlike any other
+value, \prol{self} is actually a reference.) For example:
+%
+\begin{prolac}
+module M \{
+  f ::= ...;
+\}
+module N :> M \{ ... \}
+module U has M, N \{ ...
+  let m :> *M = ..., n :> *N = ... in
+    m = n,   \cmt{\prol{*m} has static type \prol{M} but run-time type \prol{N},}
+    \cmt{as the \prol{m} pointer actually points to the \prol{n} object.}
+    m->f   \cmt{Within \prol{f}, \prol{self} will have run-time type \prol{N}.}
+    ...
+\}
+\end{prolac}
+
+The method selected for a method call \prol{O.f} depends then on the
+run-time type of \prol{O}. Let the run-time type of \prol{O} be \prol{T};
+then we select the most specific definition for \prol{f} existing in
+\prol{T} and its supertypes. More precisely, consider all possible
+definitions for \prol{f} coming from \prol{T} and all of its supertypes.
+Let these definitions be \prol{d1,\ldots, dk}, coming from modules
+\prol{M1,\ldots, Mk}. Because Prolac is restricted to single inheritance,
+the modules \prol{M1,\ldots, Mk} must form a total order under the
+supertype relation. Let $\prol{Ms} \in \{\prol{M1,\ldots, Mk}\}$ be the
+most specific module in this order---that is, we have \prol{Ms :> Mi} for
+all $\prol{Mi} \in \{\prol{M1,\ldots{}, Mk}\}$. The definition selected for
+the method call is then \prol{ds}, the method definition from \prol{Ms}.
+
+
+\subsubsection{`\protect\protprol{super}'}
+
+A module can specify that its parent's definition for a method be used by
+calling the method through the special object \prol{super}. For example:
+%
+\begin{prolac}
+module One \{
+  f :> int ::= 1;
+\}
+module Two :> One \{
+  f :> int ::= 1 + super.f;   \cmt{returns \prol{2}}
+\}
+module Three :> Two \{
+  f :> int ::= 1 + super.f;   \cmt{returns \prol{3}}
+\}
+\end{prolac}
+%
+Except for its behavior in relation to dynamic methods, \prol{super} acts
+exactly like \prol{self}.
+
+Any dynamic method in the module can use \prol{super} to call any inherited
+method; it is not limited to calling the parent's version of the current
+method. For example:
+\begin{prolac}
+module One \{ f :> int ::= 1; \}
+module Two :> One \{
+  f :> int ::= 2;
+  old-f :> int ::= super.f;   \cmt{returns \prol{1}}
+\}
+\end{prolac}
+
+Using \prol{super} is not the same as calling a method through the parent's
+name, since calling the method through the parent's name still refers to
+the most specific definition of the method. For example:
+\begin{prolac}
+module One \{ f :> int ::= 1; \}
+module Two :> One \{
+  f :> int ::= 2;
+  test ::= f,   \cmt{calls \prol{Two.f}}
+    One.f,   \cmt{also calls \prol{Two.f}}
+    super.f,   \cmt{calls \prol{One.f}}
+    super.One.f,   \cmt{also calls \prol{One.f}}
+    One.super.f;   \cmt{error}
+\}
+\end{prolac}
+
+
+\subsection{Constructors}
+\label{man:ctor}
+
+Each module may contain a special method, called its \defemph{constructor,}
+which is called when objects of the module type are created.
+(See~\rf{man:ctor-call} for more information on when constructors are
+called.) The constructor is distinguished by its name, which is the keyword
+`\prol{constructor}'. A constructor must appear in the module's top-level
+namespace; it must not be static and must not define a return type, but it
+can take parameters.
+
+The body of a constructor method is parsed differently than those of normal
+methods. It consists of zero or more \defemph{subobject constructor
+expressions} separated by commas, followed by a normal expression. A
+subobject constructor expression is just a constructor
+call~(\rf{man:ctor-call}) for the module's parent or one of its fields. For
+example:
+%
+\begin{prolac}
+module Counter \{
+  field c :> int;
+  constructor(n :> int) ::= c = n;
+\}
+module Counter2 :> Counter \{
+  field f :> Counter;
+  constructor(n1 :> int, n2 :> int) ::= 
+     Counter(n1),   \cmt{parent constructor expression}
+     f.constructor(n2);   \cmt{field constructor expression}
+\}
+\end{prolac}
+%
+In a normal context, the subexpression `\prol{Counter(n1)}' would have no
+visible effect; it'd create a new \prol{Counter} object, then throw away
+the result. As a parent constructor expression, however, it does have a
+visible effect---specifically, initializing the \prol{Counter} module.
+
+If a parent or field is not mentioned in a subobject constructor
+expression, its constructor is called without arguments. It is an error to
+omit a subobject constructor expression for a parent or field whose
+constructor requires arguments.
+
+If no constructor is provided for a module, Prolac will generate a default
+constructor which calls any necessary parent or field constructors. The
+parent's constructor may take arguments, in which case the generated
+constructor will take the same number and types of arguments and pass them
+to the parent's constructor.
+
+
+\subsection{Implicit methods}
+\label{man:implicit-meth}
+
+Explicit methods are methods the user explicitly defines. \defemph{Implicit
+methods,} on the other hand, are created automatically when a Prolac
+expression refers to an undefined
+name~(\rf{man:mod-name-original-implicit}). The compiler will fill in the
+implicit method's definition by looking through the module's fields and
+imports, subject to any \prol{using} and \prol{notusing} module operators,
+until it finds a method with the same name. Implicit methods can
+considerably simplify the text of a module by eliding frequently-used
+object or module names.
+
+A motivating example seems in order. Consider a module
+\prol{Segment-Arrives} implementing part of the TCP protocol. This module
+will frequently refer to the current transmission control block,
+\prol{tcb}, which has type \prol{*TCB}. Here is a partial definition for a
+hypothetical \prol{TCB} module:
+%
+\begin{prolac}
+module TCB \{
+  field state :> int;
+  field flags :> int; ...
+  \cmt{Which state are we in?}
+  listen ::= state == 0;
+  syn-sent ::= state == 1;
+  syn-received ::= state == 2;
+  ...
+\}
+\end{prolac}
+
+Now, how should we implement \prol{Segment-Arrives}? We want to divide
+computation into many small methods, so we could make \prol{tcb} a parameter
+to each; however, passing the parameter would quickly become tiresome.
+Therefore, we make \prol{tcb} a field in \prol{Segment-Arrives}. Here is a
+sample of what our code might look like, considerably simplified for
+didactic purposes:
+%
+\begin{prolac}
+\cmt{Example 1}
+module Segment-Arrives has TCB \{
+  field tcb :> *TCB;
+  check-segment ::=
+    (tcb->listen ==> do-listen)
+    || (tcb->syn-sent ==> do-syn-sent)
+    || (tcb->syn-received ==> do-syn-received)
+    || (tcb->established ==> do-established)
+    ...;   \cmt{and much more!}
+\}
+\end{prolac}
+%
+The repetition of `\prol{tcb->}' is tedious and hinders quick comprehension
+of the code. We know \prol{Segment-Arrives} deals with only one \prol{tcb};
+why should we have to tell the compiler which \prol{tcb} we mean again and
+again?
+
+One solution is to generate forwarding methods in \prol{Segment-Arrives}. We
+hide these forwarding methods using after-module
+operators~(\rf{man:after-mod-op}), since they are artifacts of the
+implementation.
+%
+\begin{prolac}
+\cmt{Example 2}
+module Segment-Arrives has TCB \{
+  field tcb :> *TCB;
+  check-segment ::=
+    (listen ==> do-listen)
+    || (syn-sent ==> do-syn-sent)
+    ...;
+  listen ::= tcb->listen;
+  syn-sent ::= tcb->syn-sent;
+  ...
+\} hide (listen, syn-sent, ...);
+\end{prolac}
+%
+This is better; however, the forwarding methods clutter the module
+definition and, again, are tedious and error-prone to write.
+
+The solution in Prolac is to use implicit methods. We use the \prol{using}
+module operator~(\rf{man:mod-using}) to open \prol{tcb} for implicit method
+search. When the compiler creates \prol{Segment-Arrives}'s original
+namespace, it searches its methods for undefined names, entering them in
+\prol{Segment-Arrives}'s top-level namespace as undefined implicit methods.
+Later, it creates their definitions through a search process. It marks the
+implicit methods as highly inlineable and hides them in the default
+namespace. Thus, the compiler transforms the following code into something
+like Example 2:
+%
+\begin{prolac}
+\cmt{Example 3}
+module Segment-Arrives has TCB \{
+  field tcb :> *TCB \b{using all};
+  check-segment ::=
+    (listen ==> do-listen)
+    || (syn-sent ==> do-syn-sent)
+    ...;
+\}
+\end{prolac}
+%
+In Example 3, unlike the earlier examples, nothing distracts the reader
+from exactly what the module is doing.
+
+Implicit methods are meant to make code more readable rather than less.
+Their overuse can make code very difficult to understand, however;
+moderation is required.
+
+Only methods and exceptions can be found implicitly: referring to a field
+always requires explicit syntax.
+
+The remainder of this section describes the various mechanisms supporting
+implicit methods, specifically the implicit method search algorithm and the
+\prol{using} and \prol{notusing} module operators.
+
+
+\subsubsection{Implicit method search}
+\label{man:implicit-meth-search}
+
+Prolac allows implicit methods to be found in a module's supertypes.
+Therefore, this example will work:
+%
+\begin{prolac}
+module I \{
+  implicit ::= ...;
+\}
+module S has I using all \{ \}
+module M :> S \{
+  ... implicit ...   \cmt{finds \prol{I.implicit}}
+\}
+\end{prolac}
+%
+This is behavior is required for predictable programming. Consider, for
+example, inheriting from a module in order to extend it---not being able to
+refer to implicit names which the parent module used would be very
+counterintuitive. The following algorithm implements implicit method
+search, including parents, without surprising behavior.
+
+To find an implicit method named \vprol{n} in module \prol{M}, a
+breadth-first search is performed. First all of \prol{M}'s imports and
+fields are checked for a top-level method named \vprol{n}; then \prol{M}'s
+parent's imports and fields; then \prol{M}'s grandparent's imports and
+fields; and so on. The search continues backwards in the module hierarchy
+until there are no more ancestors or a definition is found.
+
+A definition is found for \vprol{n} in some import or field iff:
+\begin{enumerate}
+\item That import or field has a module or pointer-to-module type; 
+\item That module has a visible method, exception, or namespace
+call~(\rf{man:methcall-namesp}) named \vprol{n}; and
+\item A `\prol{using \v{n}}' or `\prol{using all}'
+directive~(\rf{man:mod-using}) is in effect on that module.
+\end{enumerate}
+%
+A warning is given if, at any point during the search, the algorithm finds
+a field or a namespace that cannot be called~(\rf{man:methcall-namesp})
+instead of a method or exception.
+
+If two or more definitions for \vprol{n} are found in the same generation
+of the search, the implicit method is ambiguous and an error is reported.
+For example, if two of \prol{M}'s fields define \vprol{n}, \vprol{n} is
+ambiguous; but also, if \prol{M}'s parent has two fields \prol{f1} and
+\prol{f2} which both have an \vprol{n} method, then \vprol{n} is ambiguous,
+and so on.
+
+If a unique definition for \vprol{n} is found in any generation of the
+search, that definition is used. It is an error (specifically, an undefined
+variable error) if no definition is found.
+
+There are some caveats. First, if the parent (grandparent, etc.) is closed
+off to implicit method search by an explicit `\prol{notusing all}', neither
+that parent nor its supertypes are searched.
+
+Second, only static methods~(\rf{man:statdyn-meth}) are considered in
+imports, and only dynamic methods are considered in fields. Thus, there is no
+ambiguity in this example:
+\begin{prolac}
+module I \{
+  dyn ::= ...;
+  static stat ::= ...;
+\}
+module M has I using all \{
+  field f :> I using all;
+  test ::=
+    dyn,   \cmt{unambiguously \prol{f.dyn} (\prol{I.dyn} not considered)}
+    stat;   \cmt{unambiguously \prol{I.stat} (\prol{f.stat} not considered)}
+\}
+\end{prolac}
+For purposes of implicit method search, exceptions are treated like static
+methods.
+
+
+\subsubsection{Implicit method definitions}
+
+Once the compiler finds an unambiguous definition \vprol{D} for an implicit
+method named \vprol{n}, it writes a forwarding definition for \vprol{n} which
+simply calls \vprol{D}. The forwarding definition depends on \vprol{D}:
+specifically, the new definition takes the same number of parameters with
+the same respective types and returns the same type as \vprol{D}.
+
+If \vprol{D} was found in an import \vprol{I}, the definition will look
+like this:
+\begin{prolac}
+static \v{n}(\v{parameters}) ::= \v{I}.\v{n}(\v{parameters});
+\end{prolac}
+If \vprol{D} was found in a field \vprol{f}, there are two possibilities,
+depending on whether \vprol{f} has pointer-to-module type:
+\begin{prolac}
+\v{n}(\v{parameters}) ::= \v{f}.\v{n}(\v{parameters});
+\v{n}(\v{parameters}) ::= \v{f}->\v{n}(\v{parameters});
+\end{prolac}
+
+
+\subsubsection{`\protect\protprol{using}' module operator}
+\label{man:impmeth-mod-op}
+\label{man:mod-using}
+
+The user controls implicit method search through the \prol{using} and
+\prol{notusing} module operators. The \prol{using} operator makes a
+module's names available for implicit method search. Its left operand must
+be a module expression; its right operand must be a list of simple names
+(qualified names can never be implicit methods, anyway), or either
+`\prol{all}' or `\prol{allstatic}'.
+
+Here is a simple example:
+\begin{prolac}
+module M \{
+  static f ::= ...;
+\}
+module U has M \{
+  ... f ...   \cmt{error: `f' undefined}
+\}
+module U2 has M using f \{
+  ... f ...   \cmt{OK}
+\}
+\end{prolac}
+`\prol{using all}' makes all of a module's top-level names available for
+implicit method search, while `\prol{using allstatic}' makes all of a module's
+\emph{static} top-level names available for implicit method search.
+
+Note that any field module types are actually references to a module's
+import list. This can lead to more \prol{using} directives than you want:
+\begin{prolac}
+module U1 has M using all \{
+  field m1 :> M;
+  field m2 :> M;
+\}
+\cmt{is equivalent to...}
+module U2 has M using all \{
+  field m1 :> M using all;
+  field m2 :> M using all;
+\}
+\end{prolac}
+Any reference to a dynamic implicit method from \prol{M} will result in an
+ambiguity between \prol{m1}'s definition and \prol{m2}'s. To fix this
+situation, use \prol{notusing}, or say `\prol{using allstatic}' in the
+module header instead of `\prol{using all}'.
+
+
+\subsubsection{`\protect\protprol{notusing}' module operator}
+\label{man:mod-notusing}
+
+The \prol{notusing} operator hides a module's names from implicit method
+search. Its left operand must be a module expression; its right operand
+must be a list of simple names or `\prol{all}'. (You can't say
+`\prol{notusing allstatic}'.)
+
+
+\subsubsection{Notes}
+\label{man:impmeth-notes}
+
+Once they are defined through the implicit method search defined above,
+implicit methods are treated identically to normal methods by the language.
+In particular, this means that \emph{implicit methods can be overridden} in
+a module's subtypes, although this will not normally happen because
+implicit methods are hidden by default.
+
+
+\subsection{Export specifications}
+\label{man:export}
+
+Prolac does not, by default, generate a C function definition for every
+method in the Prolac program; rather, \defemph{export specifications} tell
+Prolac which methods to generate. Export specifications are placed outside
+of any module in the Prolac input file. Here is the syntax for an export
+specification:
+%
+\begin{prolac}
+export \v{module}.\v{method} [, \v{module}.\v{method} ...]
+\end{prolac}
+
+\vprol{Module} must be a module name (possibly preceded by namespace
+qualifiers); \vp{method} can be a method from that module or `\prol{all}',
+which means ``export all methods defined in \vprol{module}''.
+
+Prolac collects all export specifications and generates code for the
+methods they mention in arbitrary order. It then recursively generates code
+for all the methods they call, the methods those methods call, and so on,
+until it reaches closure.
+
+
+%%%%%
+% Fields
+%%
+
+\section{Fields}
+\label{man:fields}
+
+\emph{Fields} are module-specific variables. Like
+methods~(\rf{man:statdyn-meth}), fields can be static or dynamic; dynamic
+fields are like instance variables or slots in other object-oriented
+languages, while static fields are more like global variables. Each object
+of a module type has its own copy of each of the module's dynamic fields,
+while only one copy exists of each of a module's static fields. Any field,
+static or dynamic, must be part of some module.
+
+Fields are declared with the following syntax:
+\begin{prolac}
+[static] field \v{name} :> \v{type};
+\end{prolac}
+Remember that, if \v{type} is a module type, it must be a visible supertype
+of the current module or it must have been explicitly
+imported~(\rf{man:mod-import}).
+
+A dynamic field can be referred to only in a dynamic
+context~(\rf{man:statdyn-context}); in a dynamic method, `\prol{self.}' can
+be omitted when referring to \prol{self}'s dynamic fields. Unlike methods,
+fields cannot be overridden and they cannot be found with any kind of
+implicit search.\footnote{Implicit method search abbreviates something the
+user could do herself (write forwarding methods). However, the user cannot
+create a ``forwarding field''.}
+
+
+%%%%%
+% Exceptions
+%%
+
+\section{Exceptions}
+\label{man:except}
+
+\emph{Exceptions} in Prolac signal conditions that cause normal processing
+to terminate. Prolac exceptions have termination semantics, like exceptions
+in C++ or Java; but unlike those languages, a Prolac exception carries no
+information other than its name. You declare an exception inside a module
+as follows:
+\begin{prolac}
+exception \v{exception-name} ;
+\end{prolac}
+
+Every exception declaration introduces a unique exception. Thus, two
+exceptions with the same name are distinct if they were declared in
+different modules. There are no restrictions on where exceptions can be
+raised or caught---an exception can be raised or caught wherever that
+exception can be named. In particular, the module that raises an exception
+need not be a subtype of the module that declared the exception.
+
+
+\subsection{Raising exceptions}
+\label{man:except-raise}
+
+You raise an exception simply by calling it, as if it were a method taking
+no parameters:
+\begin{prolac}
+module M \{
+  exception invariant-failed;
+  f ::= !check-invariant ==> invariant-failed;
+\}
+\end{prolac}
+If \prol{check-invariant} returns \prol{false}, the \prol{invariant-failed}
+exception will be raised and control transferred to the most recently
+executed `\prol{catch invariant-failed}' or `\prol{catch all}'. If there
+was no such \prol{catch}, the topmost Prolac method will return with a
+negative value.
+
+Only methods returning \prol{void} or \prol{bool} may raise an exception.
+Methods returning more complex types must use \prol{catch}
+expressions~(\rf{man:catch-op}) to handle any exceptions their bodies may
+throw. The compiler checks this invariant. For example:
+\begin{prolac}
+module M \{
+  exception bad;
+  f1 ::= bad;   \cmt{OK: \prol{f1} returns \prol{bool}}
+  f2 :> int ::= bad;   \cmt{error}
+  f3 :> int ::= (bad catch bad), 5;
+           \cmt{OK: the \prol{bad} exception cannot escape \prol{f3}}
+  f4 :> int ::= (f1 ? 1 : 2);
+           \cmt{error: \prol{f1} can throw an exception \prol{f4} does not handle}
+\}
+\end{prolac}
+
+Exceptions behave in expressions as if they had arbitrary type, so they may
+be used in any context without causing a type error.
+
+
+\subsection{Handling exceptions: `\protect\protprol{catch}'}
+\label{man:catch-op}
+
+The `\prol{catch}' operator is used to catch one or more exceptions within a
+subexpression. Its left operand is the subexpression; its right expression
+is an exception name, a comma-separated list of exception names, or
+`\prol{all}', which catches all exceptions. Some examples:
+\begin{prolac}
+do-something catch X1
+do-something, do-something-else catch (X1, X2, X3)
+do-something-else-again catch all
+\end{prolac}
+An expression `\prol{A catch X}' has type \prol{bool}. Its return value is
+\prol{true} if one of the exceptions \prol{X} was raised but not caught
+inside \prol{A}; it is \prol{false} otherwise.
+
+The precedence of \prol{catch} is very low on the left and very high on the
+right~(\rf{man:op-prec}). This lets you write sequential exception handlers
+without using parentheses. These two expressions are equivalent:
+\begin{prolacindent}
+\begin{tabular}{@{}lll}
+\prol{A catch X1 ==> H1}	&& \prol{(( (( ((A catch X1) ==> H1)} \\
+\prol{~~~~catch X2 ==> H2}	&$\equiv$& \prol{~~~~~~catch X2) ==> H2)} \\
+\prol{~~~~catch all ==> H3}	&& \prol{~~catch all) ==> H3)} \\
+\end{tabular}
+\end{prolacindent}
+Here, \prol{H1} is executed if the exception \prol{X1} is raised within
+\prol{A}; \prol{H2} is executed if \prol{X2} is raised within \prol{A} or
+\prol{H1}; and \prol{H3} is executed if any exception gets through the
+other handlers.
+
+
+
+%%%%%
+% Types and values
+%%
+
+\section{Types}
+\label{man:type}
+
+This section describes the Prolac type system, including Prolac's built-in
+types and their values and allowable conversions between types. Prolac
+supports void, boolean, and arithmetic types, module types, and pointer and
+array types. It does not support function or method types.
+
+The type declaration operator `\prol{:>}'~(\rf{man:type-op}) is used in
+Prolac to declare the types of fields, parameters, methods, and supertypes.
+We write `\prol{V~:>~T}' for ``\prol{V} has type \prol{T}'' or ``\prol{V}
+is a \prol{T}''.
+
+Types can occur in Prolac expressions only in casts and to the right of
+`\prol{:>}'~(\rf{man:type-op}). Module types can also appear to the left of
+`\prol{.}' (member access, \rf{man:member-op}) and as constructor
+calls~(\rf{man:ctor-call}). It is an error if a type expression occurs
+inside a value expression in another context.
+
+
+\subsection{Converting and casting}
+\label{man:conv-cast-type}
+
+The two processes of \defemph{conversion} (or, equivalently,
+\defemph{implicit conversion}) and \defemph{casting} convert a value from
+one type to another. Casting is strictly more powerful than conversion.
+
+Prolac automatically invokes implicit conversion in any context where a
+value is expected to be of some type---for example, the test argument to a
+choice operator `\prol{?:}'~(\rf{man:choice-op}) is expected to have type
+\prol{bool}. Integral values and pointer values both implicitly convert to
+\prol{bool}, as defined below, so these values are also acceptable as test
+arguments. The phrase ``\prol{V} is converted to \prol{T}'' means
+``\prol{V} is implicitly converted to \prol{T} if this is possible; if not,
+an error is reported.''
+
+Prolac never automatically casts a value; the user explicitly invokes a
+cast by using the type cast operator~(\rf{man:type-op}). Whenever a value
+\prol{V} can be implicitly converted to a type \prol{T}, the explicit cast
+`\prol{(T)V}' is also possible and has the same result.
+
+
+\subsection{Common types}
+\label{man:common-type}
+
+Two types \prol{T1} and \prol{T2} always have a \defemph{common type},
+which is used when \prol{T1} and \prol{T2} are combined in an expression;
+for example, the choice expression `\prol{test~? V1 : V2}', whose value may
+be either \prol{V1 :> T1} or \prol{V2 :> T2}, has the common type of
+\prol{T1} and \prol{T2} as its type. Implicit conversions (never casts) are
+used to convert each operand to the common type.
+
+The common type for two types \prol{T1} and \prol{T2} is found as follows:
+\begin{enumerate}
+\item If \prol{T1} and \prol{T2} are the same type \prol{T}, the common
+type is \prol{T}.
+
+\item If either \prol{T1} or \prol{T2} is \prol{bool} and the other can be
+implicitly converted to \prol{bool} (i.e., it is \prol{bool} or an integral
+or pointer type), the common type is \prol{bool}.
+
+\item If both \prol{T1} and \prol{T2} are integral types, the common type
+is the larger of them (see~\rf{man:int-type}).
+
+\item If both \prol{T1} and \prol{T2} are pointer types, then:
+\begin{enumerate}
+\item If either \prol{T1} or \prol{T2} is \prol{*void}, the common type is
+\prol{*void}.
+\item If \prol{T1} and \prol{T2} are pointers to module types \prol{M1} and
+\prol{M2}, then if either module is an supertype of the other, the pointer
+type to the supertype is returned.
+\end{enumerate}
+
+\item Otherwise, the common type is \prol{void}.
+\end{enumerate}
+
+
+\subsection{\protect\protprol{void}}
+\label{man:void-type}
+
+The \prol{void} type signifies the absence of any value. Any expression can
+be implicitly converted to \prol{void}. A \prol{void} expression cannot be
+cast to any other type.
+
+Because \prol{void} implies the absence of a value, it is an error to
+declare a value (object, parameter, field, etc.) of type \prol{void}.
+\prol{void} is most useful as a method return type and as the base for the
+generic pointer type \prol{*void}.
+
+
+\subsection{\protect\protprol{bool}}
+\label{man:bool-type}
+
+\prol{bool} is the Boolean type. It has two values, \prol{true} and
+\prol{false}.
+
+Integral values implicitly convert to \prol{bool}, with \prol{0} converting
+to \prol{false} and any non-zero value converting to \prol{true}. Pointer
+types also implicitly convert to \prol{bool}: the null pointer converts to
+\prol{false}, any non-null pointer to \prol{true}.
+
+\prol{bool} values may be explicitly cast to integral types; \prol{false}
+casts to \prol{0} and \prol{true} casts to \prol{1}.
+
+
+\subsection{Integral types}
+\label{man:int-type}
+
+Prolac has nine integral types: four signed types, \prol{char},
+\prol{short}, \prol{int}, and \prol{long}; four unsigned types,
+\prol{uchar}, \prol{ushort}, \prol{uint}, and \prol{ulong}; and one
+unsigned type with circular comparison~(\rf{man:circular-compare}),
+\prol{seqint}. Their properties are summarized in this table; \textbf{size}
+is in bits:
+\begin{center}
+\begin{tabular}{l@{\ \ }rl@{}lll@{}lll@{}lll}
+\multicolumn{3}{c}{\textbf{Size}} &
+\multicolumn{3}{c}{\textbf{Signed}} &
+\multicolumn{3}{c}{\textbf{Unsigned}} &
+\multicolumn{3}{c}{\textbf{Circular}} \\
+&  8 &&& \prol{char} &&& \prol{uchar} \\
+& 16 &&& \prol{short} &&& \prol{ushort} \\
+& 32 &&& \prol{int} &&& \prol{uint} &&& \prol{seqint} \\
+& 64 &&& \prol{long} &&& \prol{ulong} \\
+\end{tabular}
+\end{center}
+
+The common type of two integral types is the larger of the two types, as
+defined below.
+%
+\begin{itemize}
+\item If either type is \prol{ulong}, the common type is \prol{ulong}.
+
+\item Otherwise, if either type is \prol{long}, the common type is
+\prol{long}.
+
+\item Otherwise, if either type is \prol{seqint}, the common type is
+\prol{seqint}.
+
+\item Otherwise, if either type is \prol{uint}, the common type is
+\prol{uint}.
+
+\item Otherwise, the common type is \prol{int}.
+\end{itemize}
+
+
+\subsection{Module types}
+\label{man:mod-type}
+
+Each defined module \prol{M} is a distinct type. Note that two versions of
+the same module with different module operators~(\rf{man:mod-op}) do not
+define two different types; in terms of type, \prol{M} is equivalent to
+`\prol{M hide all inline x}'.
+
+If \prol{S} is a supertype of \prol{M}, a pointer of type \prol{*M} may be
+implicitly converted to a pointer of type \prol{*S}~(\rf{man:ptr-type}).
+However, unlike most object-oriented languages, an object of type \prol{M}
+cannot be converted or cast to an object of type \prol{S}: only pointers
+exhibit true subtyping behavior.
+
+
+\subsection{Pointer types}
+\label{man:ptr-type}
+
+If \prol{T} is a type, then \prol{*T} is also a type, representing a pointer
+to a value of type \prol{T}. (Note that Prolac differs syntactically from
+C, where the `\prol{*}' operator attaches to the declared name, not the
+type.)
+
+As in C, \prol{*void} is the generic pointer type: any pointer can be
+implicitly converted to type \prol{*void}, and an object of type
+\prol{*void} can be implicitly converted to any pointer type.
+
+A pointer to a module \prol{M} can be implicitly converted to a pointer to
+a module \prol{S}, where \prol{S} is an supertype of \prol{M}. Furthermore,
+a pointer to \prol{S} can be explicitly cast to type \prol{*M}.
+
+The integer constant \prol{0} can be implicitly converted to any pointer
+type, resulting in a \defemph{null pointer} of the given type. The
+semantics of such a null pointer are the same as in C. Except for
+`\prol{0}' itself, integer constant expressions evaluating to \prol{0} are
+not acceptable null pointers.
+
+
+\subsection{Array types}
+\label{man:array-type}
+
+If \prol{T} is a type and \prol{k} is a nonnegative static integer
+constant, then `\prol{T[k]}' is also a type, representing an array of
+\prol{k} \prol{T} objects. The array dimension \prol{k} may be a symbolic
+constant~(\rf{man:symbolic-const}).
+
+An object of type \prol{T[k]} may be implicitly converted to a pointer
+object of type \prol{*T}.
+
+
+%%%%%
+% Expressions
+%%
+
+\section{Expressions}
+\label{man:expr}
+
+This section describes the Prolac operators. Prolac is an expression-based
+language; unlike C, but like Lisp and ML, Prolac has no concept of
+statement (a control structure which is not an expression). This means that
+Prolac has even more operators and precedence levels than C (which, some
+might argue, already had too many); it also means that once you understand
+the Prolac operators, you can understand any computation expressed in
+Prolac.
+
+Prolac operators fall into several categories. \defemph{Method calls} are
+discussed first~(\rf{man:methcall-expr}), followed by \defemph{control flow
+operators}, which control Prolac's order of computation. The
+\defemph{\prol{let} operator}~(\rf{man:let-op}) and \defemph{C
+blocks}~(\rf{man:cblock-op}) come next, followed by \defemph{member
+operators}~(\rf{man:member-op}), \defemph{typing
+operators}~(\rf{man:type-op}), \defemph{code motion operators}
+(\prol{inline} and \prol{outline}, \rf{man:codemotion-op}), and \defemph{C
+operators}, whose meanings are the same in Prolac as in C ~(\rf{man:c-op}).
+
+
+\subsection{Operator precedence}
+\label{man:op-prec}
+
+Table~\ref{man:fig:op-prec}%
+% Crap to see if we need to generate a page reference.
+\edef\next{\pageref{man:fig:op-prec}}\edef\nexta{\pageref{man:op-prec}}%
+\ifx\next\nexta\else, on page \pageref{man:fig:op-prec},\fi\space
+% OK!
+lists all of Prolac's operators and their precedences. Some operators do
+not have precedence as they textually contain all their subexpressions;
+these are listed at the bottom of the table. Of course, grouping
+parentheses can be used to override any default precedence or
+associativity.
+
+\begin{table}[p]
+\label{man:fig:op-prec}
+\def\rightassoc{(\textsc{r})}
+
+\begin{small}
+\begin{center}
+\begin{raggedright}
+\let\R\raggedright
+\def\T{\v{T}}\def\M{\v{M}}%
+\def\e#1{\v{e#1}}\def\ee{\v{e}}%
+\def\n#1{\v{n#1}}\def\nn{\v{n}}%
+\def\kk{\v{k}}%
+\def\quad{\hskip 5pt minus2pt\relax}%
+\def\br{\hfill\break}%
+\newcount\countdown
+\def\DP{\the\countdown.\global\advance\countdown by-1\relax}
+\countdown=23
+\begin{tabular}{@{}r@{\ \ }p{1.25in}p{1.6in}}
+%
+\multicolumn{3}{c}{\textbf{Operators with precedence}} \\
+%
+\DP & \prol{\ee.\nn} \quad \prol{.\nn}
+		& member~\rf{man:member-op} \\
+    & \prol{\ee->\nn}
+		& pointer to member~\rf{man:member-op} \\
+\DP & \prol{\v{f}(\e1, \e2, ...)}
+		& method call~\rf{man:methcall-expr} \\
+    & \prol{\e1[\e2]}
+		& array reference \\
+    & \prol{\ee++} \quad \prol{\ee--}
+		& postincrement, postdecrement \\
+\DP & \prol{(\T)\ee}
+		& type cast~\rf{man:type-op} \\
+\DP & module operators~(\rf{man:mod-op}): \\
+    & \prol{\M\ hide \nn} \quad \prol{\M\ show \nn} \br \prol{\M\ rename (\n1=\n2)}
+    		& namespace control~\rf{man:name-mod-op} \\
+    & \prol{\M\ using \nn} \quad \prol{\M\ notusing \nn}
+		& implicit methods~\rf{man:impmeth-mod-op} \\
+    & \prol{\M\ inline[\kk] \nn}
+		& inlining~\rf{man:mod-inline}\\
+    & \multicolumn{2}{@{}l}{\prol{\M\ noinline \nn} \quad \prol{\M\
+    defaultinline \nn} \quad \prol{\M\ pathinline \nn}} \\
+\DP & \prol{\ee~:>~\T}
+		& type declaration~\rf{man:type-op} \\
+\DP & \prol{*\ee}
+		& dereference \\
+    & \prol{\&\ee}
+		& address of \\
+    & \prol{+\ee} \quad \prol{-\ee}
+		& unary plus/minus \\
+    & \prol{\~\ee}
+		& bitwise not \\
+    & \prol{!\ee}
+		& logical not \\
+    & \prol{++\ee} \quad \prol{--\ee}
+		& preincrement, predecrement \\
+    & \prol{inline[\kk] \ee}
+		& inlining~\rf{man:inline-op} \\
+    & \multicolumn{2}{@{}l}{\prol{noinline \ee} \quad \prol{defaultinline
+    \ee} \quad  \prol{pathinline \ee}} \\
+\DP & \R\prol{\e1~*~\e2}  \quad  \prol{\e1~/~\e2}  \quad  \prol{\e1~\%~\e2}
+		& multiply, divide, remainder \\
+\DP & \prol{\e1~+~\e2}  \quad  \prol{\e1~-~\e2}
+		& add, subtract \\
+\DP & \prol{\e1~<<~\e2} \quad  \prol{\e1~>>~\e2}
+		& left and right shift \\
+\DP & \prol{\e1~<~\e2}  \quad  \prol{\e1~>~\e2}
+		& arithmetic compare \\
+    & \prol{\e1~<=~\e2}  \quad  \prol{\e1~>=~\e2}
+		& \\
+\DP & \prol{\e1~==~\e2} \quad  \prol{\e1~!=~\e2}
+		& equality tests \\
+\DP & \prol{\e1~\&~\e2}
+		& bitwise and \\
+\DP & \prol{\e1~\^~\e2}
+		& bitwise xor \\
+\DP & \prol{\e1~|~\e2}
+		& bitwise or \\
+\DP & \prol{\e1~\&\&~\e2}
+		& logical and \\
+\DP & \prol{\e1~||~\e2}
+		& logical or \\
+\DP & \prol{\e1~?~\e2~:~\e3}
+		& choice~\rightassoc~\rf{man:choice-op} \\
+\DP & \prol{\e1~=~\e2} \quad \prol{\e1~+=~\e2} \quad \prol{\e1~\prolhyphen=~\e2}
+		& assignment and compound \\
+    & \prol{\e1~min=~\e2} \quad \prol{\e1~max=~\e2}
+		& assignment~\rightassoc \\
+    & \multicolumn{2}{@{}l}{\prol{\e1~*=~\e2} \quad \prol{\e1~/=~\e2}
+		\quad \prol{\e1~\%=~\e2} \quad \prol{\e1~\prollt\prollt=~\e2}
+		\quad \prol{\e1~\prolgt\prolgt=~\e2}} \\
+    & \multicolumn{2}{@{}l}{\prol{\e1~\proland=~\e2} \quad \prol{\e1~\^=~\e2} 
+		\quad \prol{\e1~\prolor=~\e2}} \\
+\DP & \prol{outline[\kk] \ee}
+		& outlining~\rf{man:outline-op} \\
+\DP & \prol{\e1, \e2}
+		& comma~\rf{man:comma-op}\\
+    & \prol{\e1\ \{\v{C\kern.9pt}\} \e2}
+		& C block~\rf{man:cblock-op}\\
+\DP & \prol{\e1~==>~\e2}
+		& arrow~\rightassoc~\rf{man:arrow-op} \\
+\DP & \prol{\e1~|||~\e2}
+		& case~\rf{man:case-op} \\
+\DP & \prol{\ee~catch~\nn}
+		& handle exception~\rf{man:catch-op} \\
+%
+\noalign{\vskip8pt}
+\multicolumn{3}{c}{\textbf{Operators without precedence}} \\
+%
+    & \prol{(\ee)}
+		& grouping \\
+    & \prol{if~\e1~then~\e2~else~\e3~end}
+		& if-then-else~\rf{man:ifthen-op} \\
+    & \prol{let~\v{decls}~in~\ee~end}
+		& let~\rf{man:let-op} \\
+    & \prol{min(\e1,~\e2)}~~\prol{max(\e1,~\e2)}
+		& minimum, maximum~\rf{man:min-max} \\
+\end{tabular}
+\end{raggedright}
+\end{center}
+\end{small}
+
+\caption[Prolac operators and precedence levels]{Prolac operators and
+precedence levels. Operators higher in the table bind more tightly;
+\rightassoc~denotes right-associative operators. If a reference is not
+given, the operator is described in~\rf{man:c-op}.}
+\end{table}
+
+%%%%
+
+\subsection{Method calls}
+\label{man:methcall-expr}
+
+A method call expression `\prol{\v{f}(...)}' expresses the execution of the
+specified method. Any \defemph{actual parameters} to the method are given
+inside the parentheses, separated by commas; they must match the method's
+declared parameters in number and type. The types need not match exactly:
+Prolac attempts to convert the actual parameters to the types of the
+declared parameters.
+
+Calls to methods without parameters need not provide parentheses. For
+example:
+\begin{prolac}
+module M \{
+  f ::= true;
+  g ::= f(),   \cmt{call \prol{M.g}}
+      g;   \cmt{also call \prol{M.g}}
+\}
+\end{prolac}
+
+Note that raising an exception~(\rf{man:except}) looks exactly like calling
+a method with no parameters.
+
+\subsubsection{Namespace call}
+\label{man:methcall-namesp}
+
+To facilitate the use of namespaces, a namespace name may be treated as a
+method or exception call. If a namespace originally named
+\prol{n}\footnote{That is, before any \prol{show} or \prol{rename}
+operations were applied.} is found within an expression where a namespace
+was not expected, Prolac looks in that namespace for a method or exception
+named \vp{n} and uses that if it is found. For example:
+\begin{prolac}
+module M \{
+  nest \{ nest ::= ...; \}
+  f ::= nest.nest,   \cmt{call \prol{M.nest.nest}}
+      nest;   \cmt{also call \prol{M.nest.nest}}
+\}
+\end{prolac}
+The search is only performed one level deep. Thus, this is an error:
+\begin{prolac}
+module M \{
+  nest \{ nest \{ nest ::= found-the-prize; \} \}
+  f ::= nest;   \cmt{error:}
+      \cmt{namespace `\prol{M.nest}' cannot be called}
+\}
+\end{prolac}
+
+In a normal Prolac expression (that is, any expression except supertype and
+import lists and operands to module operators), namespaces are expected in
+only one context: to the left of a direct member operator
+`\prol{.}'~(\rf{man:member-op}). Thus, this search is performed everywhere
+except to the left of `\prol{.}'.
+
+
+\subsubsection{Constructor calls}
+\label{man:ctor-call}
+
+Calls to a module's constructor~(\rf{man:ctor}) are used to initialize an
+object of Prolac module type. There are several ways to call constructors;
+some of them allocate stack memory to hold the object, while some
+initialize externally allocated memory.
+
+It is an error to call a constructor in any manner when the constructor has
+been hidden~(\rf{man:mod-hide}). This allows a module to suggest that no
+objects of that module type should be created except through visible
+interface functions.\footnote{The module's user could always \prol{show}
+the constructor.}
+
+\textbf{Normal constructor calls.} An expression `\prol{M(\v{args})}' where
+\prol{M} is a module is a normal constructor call. This expression
+allocates stack memory for an \prol{M} object, initializes that object by
+calling \prol{M}'s constructor with \vprol{args} as arguments, and returns
+the object.
+
+Just as with method calls, the actual arguments to a constructor call must
+match the constructor's declared parameters in number and type. Parentheses
+cannot be omitted from a normal constructor call. That is, an expression
+like `\prol{M.f}' is always interpreted as a reference to a static feature
+of \prol{M}, rather than a constructor call like `\prol{M().f}'. To force
+the constructor interpretation, simply use parentheses.
+
+\textbf{Direct constructor calls.} Externally allocated memory can be
+initialized by calling its constructor directly, as if it was a normal
+method. For example:
+\begin{prolac}
+module M \{
+  constructor(i :> int) ::= ...;
+  static new :> *M ::= let ptr :> *M in
+     \{ ptr = malloc(sizeof(M)); \}
+     ptr->constructor(97),   \cmt{direct constructor}
+     ptr end;
+\}
+\end{prolac}
+Again, the number and types of arguments must match the declared
+constructor.
+
+\textbf{Implicit constructor calls (`\prol{let}').} A \prol{let}
+binding~(\rf{man:let-op}) without a value expression will call constructors
+implicitly whenever the specified type is a module type. For example:
+\begin{prolac}
+module M \{
+  constructor(i :> int) ::= ...;
+  f ::= let m1 :> M   \cmt{same as `\prol{m1 :> M = M()}':}
+       \cmt{error: too few arguments to `\prol{M.constructor}'}
+     in let m2 :> M(5)   \cmt{same as `\prol{m2 :> M = M(5)}': OK}
+       in 0 end end;
+\}
+\end{prolac}
+
+\subsubsection{Symbolic constants}
+\label{man:symbolic-const}
+
+Symbolic constants may be defined in Prolac by creating a static method
+whose body evaluates to a constant:
+\begin{prolac}
+module M \{
+   static six :> int ::= 6;
+   static thirty-two :> int ::= 1 << (six - 1);
+\}
+\end{prolac}
+The Prolac compiler will inline calls to such methods by default.
+
+Calls to static constant methods are allowed in Prolac wherever a constant
+integer is expected---in the optional argument to \prol{inline}, for
+example. An explicit \prol{noinline} operator will prevent a static
+constant method from being usable as a Prolac
+constant~(\rf{man:mod-inline}). If a static constant method without
+parameters is called inside a C block~(\rf{man:cblock-op}), its constant
+value is used instead.
+
+
+\subsection{Control flow operators}
+\label{man:control-op}
+
+Control flow operators are semistrict: they do not always evaluate all of
+their operands. Different control flow operators express sequencing, choice
+or if-then-else semantics, conjunction, disjunction, conditional execution,
+and case statements.
+
+
+\subsubsection{Comma: `\protect\protprol{,}'}
+\label{man:comma-op}
+
+The comma operator `\prol{,}' expresses sequencing: an expression
+`\prol{A,~B}' first evaluates \prol{A}, then throws the result away and
+returns the result of \prol{B}.
+
+\prol{A} and \prol{B} can each have any type. The expression's type is the
+type of \prol{B}.
+
+
+\subsubsection{Logical and: `\protect\protprol{\proland\proland}'}
+\label{man:logand-op}
+
+The logical and operator `\prol{&&}' expresses conjunction: an expression
+`\prol{A && B}' evaluates to true iff both \prol{A} and \prol{B} are true.
+\prol{A} is evaluated first; if it is false, the whole expression must be
+false, and \prol{B} is not evaluated at all.
+
+Both \prol{A} and \prol{B} are converted to \prol{bool}. The expression
+also has type \prol{bool}.
+
+
+\subsubsection{Arrow: `\protect\protprol{==\prolgt}'}
+\label{man:arrow-op}
+
+The arrow operator `\prol{==>}' expresses conditional execution. An
+expression `\prol{A ==> B}' evaluates to true iff \prol{A} is true---but in
+that case, \prol{B} is evaluated before the expression returns. 
+
+\prol{A} is converted to \prol{bool}, but \prol{B} can have any type. The
+expression has type \prol{bool} (but see below~\rf{man:case-op}).
+
+The expression `\prol{A ==> B}' is exactly equivalent to `\prol{A &&
+(B,~true)}', except for its behavior within case bars~(\rf{man:case-op}).
+The arrow operator is useful for building ``case statements''; for example,
+this code will evaluate \prol{else-case} only if \prol{condition-1} and
+\prol{condition-2} are both false:
+\begin{prolac}
+(condition-1 ==> case-1)
+|| (condition-2 ==> case-2)
+|| else-case
+\end{prolac}
+At most one of \prol{case-1}, \prol{case-2}, and \prol{else-case} will be
+executed. 
+
+Case statements that return non-\prol{bool} values can be built from arrow
+operators and case bars~(\rf{man:case-op}).
+
+
+\subsubsection{Logical or: `\protect\protprol{\prolor\prolor}'}
+\label{man:logor-op}
+
+The logical or operator `\prol{||}' expresses disjunction: an expression
+`\prol{A || B}' evaluates to true iff either \prol{A} is true, \prol{B} is
+true, or both. \prol{A} is evaluated first; if it is true, the whole
+expression must be true, and \prol{B} is not evaluated at all.
+
+Both \prol{A} and \prol{B} are converted to \prol{bool}. The expression
+also has type \prol{bool}.
+
+`\prol{A || B}' is also legal if \prol{B} has type \prol{void}. In this
+case, `\prol{A || B}' has type \prol{void}, and is shorthand for `\prol{A ?
+(void)0 : B}'. Prolac never tries to convert \prol{B} to \prol{void}---this
+definition is only used if \prol{B}'s type is \prol{void} without
+conversion.
+
+
+\subsubsection{Choice: `\protect\protprol{?:}'}
+\label{man:choice-op}
+
+The question mark--colon operator `\prol{?:}'---also called the choice
+operator---expresses choice. An expression `\prol{A ? B : C}' first
+evaluates \prol{A}. If \prol{A} is true, it returns \prol{B} (without
+evaluating \prol{C}); otherwise, it returns \prol{C} (without evaluating
+\prol{B}).
+
+\prol{A} is converted to \prol{bool}; the type of the expression is the
+common type of \prol{B} and \prol{C}.
+
+
+\subsubsection{`\protect\protprol{if-then-else}'}
+\label{man:ifthen-op}
+
+The if-then-else operator is another way to express choice. The full syntax
+for if-then-else is as follows:
+%
+\begin{prolac}
+if \v{condition}
+then \v{case-1}
+[elseif \v{condition-2} then \v{case-2}]...
+[else \v{else-case}]
+end
+\end{prolac}
+%
+This expression is a synonym for:
+%
+\begin{prolac}
+\v{condition} ? \v{case-1}
+  [: \v{condition-2} ? \v{case-2}]...
+  : \v{else-case}
+\end{prolac}
+
+The type of the if-then-else expression is the common type of all
+\prol{\v{case}}s. The \prol{\v{else-case}} can be omitted, forming an
+if-then expression; if it is omitted, the type of the expression is
+\prol{void}.
+
+`\prol{if-then-else}' is provided primarily as an alternative to `\prol{?:}'
+for larger expressions---the `\prol{?:}' syntax becomes difficult to read
+very quickly when its operands are large.
+
+
+\subsubsection{Case bars: `\protect\protprol{\prolor\prolor\prolor}'}
+\label{man:case-op}
+
+The case bar operator `\prol{|||}', in conjunction with the arrow operator
+(\rf{man:arrow-op}), expresses a case statement returning a meaningful
+value.
+
+A case statement has this general form:
+\begin{prolac}
+\v{condition-1} ==> \v{consequent-1}
+||| \v{condition-2} ==> \v{consequent-2} ...
+||| \v{else-case}
+\end{prolac}
+Exactly one of the \vprol{consequent}s or \vprol{else-case} is executed,
+depending on which, if any, \vprol{condition} is true. The result of that
+\vprol{consequent} or \vprol{else-case} is returned as the value of the
+expression.
+
+The case statement's syntax is based on matching constructs from functional
+programming languages; here, however, the \vprol{condition}s are all
+converted to \prol{bool}. The case statement is exactly analogous to Lisp's
+\prol{cond} special form.
+
+Case bars are actually syntactic sugar for choice
+operators~(\rf{man:choice-op}). Given an expression containing `\prol{|||}',
+the compiler repeatedly applies the following transformations until no
+`\prol{|||}'s remain:
+%
+\begin{center}
+\begin{tabular}{@{}r@{~~}l@{$\;\;\Rightarrow\;\;$}l}
+1. &\prol{A ==> B ||| X}	& \prol{A ? B : X} \\
+2. &\prol{(A ? B : C) ||| X}	& \prol{A ? B : (C ||| X)} \\
+3. &\prol{(A, B) ||| X}		& \prol{A, (B ||| X)} \\
+4. &\prol{A ||| X}		& \prol{A || X} \\
+\end{tabular}
+\end{center}
+%
+Note that `\prol{|||}'s used outside the context of a case statement reduce
+to normal logical ors, `\prol{||}'~(\rf{man:logor-op}).
+
+Here is a demonstration of the transformation rules:
+\begin{prolac}
+A ==> B ||| C ==> D ||| E
+$\Rightarrow$ (A ==> B ||| C ==> D) ||| E   \cmt{left-associative}
+$\Rightarrow$ (A ? B : (C ==> D)) ||| E   \cmt{rule 1}
+$\Rightarrow$ A ? B : ((C ==> D) ||| E)   \cmt{rule 2}
+$\Rightarrow$ A ? B : (C ? D : E)   \cmt{rule 1}
+\end{prolac}
+The type of the whole expression is therefore the common type of \prol{B},
+\prol{D}, and \prol{E}.
+
+A case statement without a final \vprol{else-case} usually has type
+\prol{bool}. To see why, consider this expansion:
+\begin{prolac}
+A ==> B ||| C ==> D
+$\Rightarrow$ A ? B : (C ==> D)  \cmt{rule 1}
+\end{prolac}
+Since there are no case bars remaining, expansion is over. The type of the
+expression is then the common type of \prol{B} and `\prol{C~==>~D}'; but the
+type of `\prol{C~==>~D}' is just \prol{bool}, so \prol{B} will be converted
+to \prol{bool} if possible.
+
+
+\subsection{`\protect\protprol{let}'}
+\label{man:let-op}
+
+The \prol{let} operator, like the let operator in many functional
+languages, introduces new statically-bound variables within a
+subexpression. The syntax of \prol{let} is as follows:
+\begin{prolac}
+let \v{variable} [:> \v{type}] [= \v{value}]
+    [, \v{variable} [:> \v{type}] [= \v{value}] ...]
+in \v{body} end
+\end{prolac}
+\vprol{Variable} is just an identifier. \vprol{Type} is a type expression
+and \vprol{value} is a value expression; either \vprol{type} or
+\vprol{value} may be omitted, but not both. If \vprol{value} is omitted,
+\vprol{variable} is constructed implicitly if it has module
+type~(\rf{man:ctor-call}), or left uninitialized otherwise; if \vprol{type}
+is omitted, \vprol{variable}'s type is the type of the \vprol{value}
+expression. If neither is omitted, the \vprol{value} expression is
+converted to type \vprol{type}. It is an error if \vprol{value} cannot be
+converted to \vprol{type}.
+
+To evaluate a \prol{let} expression, Prolac first evaluates the
+\vprol{value} expressions and any necessary \vprol{type} constructors in an
+arbitrary order. The resulting values are then bound to the
+\vprol{variable}s. Finally, \vprol{body} is evaluated with these bindings
+in force. The value of the \prol{let} expression is the value of
+\vprol{body}; the type of the \prol{let} expression is the type of
+\vprol{body}. Note that a \prol{let} expression's variables are not visible
+to any of its \vprol{type} or \vprol{value} expressions.
+
+
+\subsection{C blocks: `\protect\protprol{\prollbrace...\prolrbrace}'}
+\label{man:cblock-op}
+
+A C block `\prol{\{...\}}' is used to execute C code at a given point
+during the execution of a method. The type of a C block is \prol{bool} and
+its value is always \prol{true}.
+
+C blocks are special syntactically: a C block acts like a Prolac
+value---specifically, `\prol{true}'---with implicit comma operators on
+either side. Some examples will make things clearer; the implicit
+\prol{true} is shown when necessary.
+\begin{prolacindent}
+\begin{tabular}{@{}l@{~~$\equiv$~~}l}
+\prol{\{A\}}		& \prol{\{A\}, true} \\
+\prol{\{B\} X}	& \prol{\{B\}, X} \\
+\prol{X \{C\}}	& \prol{X, \{C\}, true} \\
+\prol{X \{D\} Y}	& \prol{X, \{D\}, Y} \\
+\prol{X ==> \{E\}}	& \prol{X ==> (\{E\}, true)} \\
+\prol{X ==> Y \{F\}}	& \prol{X ==> (Y, \{F\}, true)} \\
+\prol{X = Y \{G\} Z}	& \prol{(X = Y), \{G\}, Z} \\
+\prol{X ? Y : Z \{H\}}& \prol{(X ? Y : Z), \{H\}, true} \\
+\end{tabular}
+\end{prolacindent}
+
+Some Prolac names can be used in a C block to refer to the C equivalents of
+those Prolac objects. Specifically, the following objects are available
+under their Prolac names:
+%
+\begin{enumerate}
+\item In a dynamic method, \prol{self}.
+\item In a dynamic method, any of \prol{self}'s fields or fields of its
+ancestors.
+\item Any static fields of \prol{self}, its ancestors, or its imports.
+\item Parameters from the current method.
+\item Variables bound by surrounding \prol{let}
+expressions~(\rf{man:let-op}).
+\item Static constant methods without parameters~(\rf{man:symbolic-const}).
+\end{enumerate}
+%
+This list does not include arbitrary Prolac methods: you cannot call most
+Prolac methods from C blocks using Prolac syntax.
+
+Unlike Prolac, C does not allow hyphens in
+identifiers~(\rf{man:identhyphens}). Prolac follows C's rules while parsing
+C blocks; thus, this C block will not work as expected:\footnote{Or maybe
+it is the Prolac code that does not work as expected.}
+\begin{prolac}
+let thing-1 = 0 in \{ return thing-1; \} end
+\end{prolac}
+To refer to an object with a hyphen in its name, simply change the hyphen
+to an underscore:
+\begin{prolac}
+let thing-1 = 0 in \{ return thing_1; \} end
+\end{prolac}
+
+Objects of type \prol{seqint} are treated as unsigned integers inside C
+blocks. In particular, comparisons like `\prol{seq1 < seq2}' are unsigned,
+not circular~(\rf{man:circular-compare}).
+
+
+\subsection{Member operators: `\protect\protprol{.}' and
+`\protect\protprol{\protect\prolhyphen\prolgt}'}
+\label{man:member-op}
+\label{man:statdyn-context}
+
+The member operators `\prol{.}' and `\prol{->}' express finding a feature in
+a namespace or object. The right operand of a member operator must be an
+identifier. The pointer-to-member operator `\prol{->}' is used on pointer
+types~(\rf{man:ptr-type}); the expression `\prol{A->x}' is exactly
+equivalent to `\prol{(*A).x}'. The rest of this section discusses only the
+direct-member operator, `\prol{.}'.
+
+The left-hand operand, or ``object operand'', of a member expression must
+be a namespace or have a module type. The object operand may be either a
+type or value expression. If it is a type expression, the member has
+\defemph{static context;} if it is a value expression, it has
+\defemph{dynamic context}. It is an error to refer to a static feature in
+a dynamic context, or a dynamic feature in a static context. To illustrate:
+%
+\begin{prolac}
+module M \{
+  field d :> int;
+  static s ::= 0;
+\}
+module N has M \{
+  field m-object :> M;
+  test ::=
+    M.s,   \cmt{OK: static context, static method}
+    m-object.d,   \cmt{OK: dynamic context, dynamic field}
+    M.d,   \cmt{error: static context, dynamic field}
+    m-object.s;   \cmt{error: dynamic context, static method}
+\}
+\end{prolac}
+%
+Fields, parameters, and objects always have dynamic context, while Imports
+always have static context. Supertypes are a special case: In a static
+method, supertypes have static context. In a dynamic method, supertypes
+have dynamic context; however, in this case and this case only, you may
+refer to a supertype's static feature, even though the supertype has
+dynamic context.
+
+The direct member operator `\prol{.}' also has a prefix version `\prol{.x}',
+used to look up names in the global namespace~(\rf{man:global-namesp}).
+
+
+\subsection{Type operators: `\protect\protprol{:\prolgt}' and
+`\protect\protprol{(cast)}'}
+\label{man:type-op}
+
+The type declaration operator `\prol{:>}' is used elsewhere in Prolac to
+declare the types of objects; inside a value expression, `\prol{:>}'
+expresses a type assertion. The right operand of `\prol{:>}' should be a
+type expression, \prol{T}. The value of an expression `\prol{V~:>~T}' is the
+value of \prol{V} converted~(\rf{man:conv-cast-type}) to type \prol{T}.
+Note that the `\prol{:>}' operator will only use implicit conversions on
+\prol{V}; an error is given if \prol{V} cannot be implicitly converted to
+\prol{T}. Thus, `\prol{:>}' can be used to guarantee that \prol{V} has type
+\prol{T} without invoking a possibly dangerous type cast.
+
+The type casting operator `\prol{(\v{type})}' is used to change the type of
+its value operand. The value of an expression `\prol{(T)V}', where \prol{T}
+is a type expression, is the value of \prol{V}
+cast~(\rf{man:conv-cast-type}) to type \prol{T}.
+
+
+\subsection{Code motion operators}
+\label{man:codemotion-op}
+
+Prolac provides two operators to control optimization and code motion,
+\prol{inline} and \prol{outline}. \prol{inline} is also available as a
+module operator.
+
+
+\subsubsection{`\protect\protprol{inline}' module operator}
+\label{man:mod-inline}
+
+The \prol{inline} module operator controls how a module's methods are
+inlined. Its left operand must be a module expression; its right operand
+must be a list whose elements are one of the following kinds of
+expressions:
+\begin{enumerate}
+\item A simple method name, or the name of a namespace that can be
+called~(\rf{man:methcall-namesp}); the corresponding method will be
+affected.
+\item `\prol{NS.all}', where \prol{NS} is a namespace; all methods defined
+in \prol{NS} or any of its nested namespaces will be affected.
+\item `\prol{M.all}', where \prol{M} is a supertype of the module
+expression; all methods defined by \prol{M} (specifically, whose actual is
+\prol{M}; see~\rf{man:meth}) will be affected.
+\item `\prol{all}'; all methods will be affected.
+\end{enumerate}
+
+In addition, \prol{inline} can take an optional \defemph{inline level}
+argument, which must appear in brackets directly after the \prol{inline}
+keyword. An inline level must evaluate to an integer constant whose value
+is between 0 and 3. 0 means ``do not inline under any circumstances'', 1
+means ``do not inline'', 2 means ``inline'', and 3 means ``path inline''
+(described below). If no argument is given, the inline level defaults to 2.
+
+When a method call expression~(\rf{man:methcall-expr}) is evaluated, Prolac
+checks the corresponding module for that method's inline level; if it is high
+enough and the method call is unambiguous (i.e., no dynamic dispatch is
+possible), the method call will be inlined. For example:
+%
+\begin{prolac}
+module M \{
+  method ::= ...;
+\}
+module N has M \{
+  test(r1 :> M, r2 :> M inline all) ::=
+     r1.method,   \cmt{not inlined}
+     r2.method;   \cmt{inlined}
+\}
+\end{prolac}
+
+A method call labeled with inline level 3 is \emph{path inlined}: any
+methods called by the first method are inlined as well. For example:
+\begin{prolac}
+module M \{
+  a ::= \{ XXX; \};
+  b ::= a;
+  d ::= inline[3] b;
+  \cmt{generates code like `\prol{d ::= \{ XXX; \};}'}
+  \cmt{rather than `\prol{d ::= a;}'}
+\}
+\end{prolac}
+This recursive inlining can be stopped by \prol{inline[0]}. Recursive or
+mutually recursive methods are currently inlined only one level deep,
+except for tail recursive methods, which are inlined into loops.
+
+The operators \prol{noinline}, \prol{defaultinline} and \prol{pathinline}
+are equivalent to \prol{inline[0]}, \prol{inline[1]} and \prol{inline[3]},
+respectively.
+
+
+\subsubsection{Expression `\protect\protprol{inline}'}
+\label{man:inline-op}
+
+Expression \prol{inline} is a prefix unary operator appearing in method
+bodies (the \prol{inline} module operator is a binary operator appearing in
+module expressions). Like the \prol{inline} module operator, expression
+\prol{inline} can take an optional inline level argument in brackets, and
+the \prol{noinline}, \prol{defaultinline}, and \prol{pathinline} module
+operators have expression equivalents.
+
+An expression `\prol{inline[\v{n}] X}' simply evaluates \prol{X} and
+returns its value; the type of `\prol{inline[\v{n}] X}' is the type of
+\prol{X}. However, any method calls within \prol{X} are inlined with inline
+level \vprol{n}. Expression \prol{inline} overrides any \prol{inline}
+module operators.
+
+
+\subsubsection{`\protect\protprol{outline}'}
+\label{man:outline-op}
+
+The prefix unary operator \prol{outline} appears in method bodies and
+controls \defemph{code outlining,} the removal of infrequently-executed
+code from a computation's critical path. The \prol{outline} operator tells
+the compiler that the current branch of control flow is relatively
+unlikely; the compiler will move that branch to the end of the function
+body in the code it generates. This tends to improve i-cache utilization.
+
+Like the \prol{inline} operators, \prol{outline} it takes an optional
+static integer constant argument which must be between 0 and 10. Here, 0
+means ``never outline'', while 10 means ``outline as far as possible''; or,
+equivalently, 0 means ``this is the most common branch'' and 10 means
+``this is the least common branch''.
+
+An expression `\prol{outline[\v{n}] X}' evaluates \prol{X} and returns its
+value; its type is the type of \prol{X}.
+
+The \prol{outline} operator is only meaningful on the destination of a code
+branch, such as to the right of `\prol{&&}', `\prol{||}', or `\prol{==>}',
+or on either consequent of a choice operator~(\rf{man:choice-op},
+\rf{man:ifthen-op},~\rf{man:case-op}). To see why, consider the expression
+`\prol{A + (outline B)}'. This expression suggests that \prol{B} is less
+likely to be executed than \prol{A}; but this is impossible, since (unless
+\prol{A} generates an exception) \prol{B} will be executed whenever
+\prol{A} is. Prolac does not warn on such expressions; rather, it floats
+the \prol{outline} into the expression until it finds a control flow
+operator, and attaches the \prol{outline} onto that operator's rightmost
+operand. Thus, these pairs of expressions are equivalent:
+
+\begin{prolacindent}
+\begin{tabular}{@{}l@{~~$\equiv$~~}l}
+\prol{A + (outline B ? C : D)}	& \prol{A + (B ? C : (outline D))} \\
+\prol{outline A || B}		& \prol{A || (outline B)} \\
+\end{tabular}
+\end{prolacindent}
+
+
+\subsection{Lvalues}
+\label{man:lvalue}
+
+Some expressions are \defemph{lvalues,} meaning that they can appear on the
+\emph{l}eft side of an assignment expression. Only the following
+expressions are lvalues:
+\begin{enumerate}
+\item Field~(\rf{man:fields}), parameter, or \prol{let}-bound
+variable~(\rf{man:let-op}) references;
+\item Dereferences `\prol{*X}', where \prol{X} is an object of pointer
+type~(\rf{man:star-op});
+\item `\prol{(X)}', where \prol{X} is an lvalue.
+\end{enumerate}
+
+
+\subsection{C operators}
+\label{man:c-op}
+
+This section describes the remaining operators, whose definitions are
+generally borrowed from C.
+
+
+\subsubsection{Dereference: unary `\protect\protprol{*}'}
+\label{man:star-op}
+
+The unary star or dereference operator `\prol{*}' acts differently
+depending on whether its operand \prol{X} is a type or value expression.
+
+If \prol{X} is a value expression, then it must have some pointer type
+\prol{*T}, but not \prol{*void}. The expression `\prol{*X}' then has type
+\prol{T}; its value is the value of the object to which \prol{X} points.
+
+If \prol{X} is a type expression, then `\prol{*X}' is also a type expression
+defining the type ``pointer to \prol{X}''~(\rf{man:ptr-type}).
+
+
+\subsubsection{Address of: unary `\protect\protprol{\proland}'}
+\label{man:addr-op}
+
+The operand in an address expression `\prol{&X}' must be an
+lvalue~(\rf{man:lvalue}). The value of the expression is a pointer to
+\prol{X}; it has type `\prol{*T}', where \prol{T} is the type of \prol{X}.
+
+
+\subsubsection{Equality tests: `\protect\protprol{==}',
+`\protect\protprol{!=}'}
+\label{man:eq-op}
+
+Any two non-module values may be compared for equality. In an expression
+`\prol{X~==~Y}', \prol{X} and \prol{Y} are both converted to their common
+type~(\rf{man:common-type}), which must not be \prol{void}; as a special
+case, any pointer can be compared with the integer constant \prol{0}, which
+is converted to a null pointer. The result has type \prol{bool}, and is
+\prol{true} iff \prol{X} and \prol{Y} are equal.
+
+The expression `\prol{X != Y}' is a synonym for `\prol{!(X~==~Y)}'.
+
+
+\subsubsection{Arithmetic compare: `\protect\protprol{\prollt}',
+`\protect\protprol{\prollt=}', `\protect\protprol{\prolgt}',
+`\protect\protprol{\prolgt=}'}
+\label{man:compare-op}
+\label{man:circular-compare}
+
+The operands to an arithmetic compare operation are converted to their
+common type, which must be an integral or pointer type. Any integer value
+can be compared to any other, and two pointers of the same type can be
+compared. As a special case, any pointer can be compared with the integer
+constant \prol{0}, which is converted to a null
+pointer~(\rf{man:ptr-type}). An arithmetic compare expression has type
+\prol{bool}.
+
+If the common type is \prol{seqint}, a circular comparison is performed
+modulo 2\textsuperscript{32}. The circular comparison operators are defined
+as follows:
+\begin{center}
+\begin{tabular}{l@{~~$\equiv$~~}l}
+\prol{seq1 < seq2}	& \prol{(int)(seq1 - seq2) < 0} \\
+\prol{seq1 <= seq2}	& \prol{(int)(seq1 - seq2) <= 0} \\
+\prol{seq1 > seq2}	& \prol{(int)(seq1 - seq2) > 0} \\
+\prol{seq1 >= seq2}	& \prol{(int)(seq1 - seq2) >= 0} \\
+\end{tabular}
+\end{center}
+This definition corresponds to comparison on TCP sequence numbers.
+
+
+\subsubsection{Minimum and maximum}
+\label{man:min-max}
+
+The minimum and maximum operators are defined as follows, except that
+complex subexpressions will be evaluated exactly once.
+%
+\begin{center}
+\begin{tabular}{l@{~~$\equiv$~~}l}
+\prol{min(X, Y)}	& \prol{X < Y ? X : Y} \\
+\prol{max(X, Y)}	& \prol{X > Y ? X : Y} \\
+\prol{X min= Y}	& \prol{X = min(X, Y)} \\
+\prol{X max= Y}	& \prol{X = max(X, Y)} \\
+\end{tabular}
+\end{center}
+%
+`\prol{min}' and `\prol{max}' use circular comparison on \prol{seqint}s.
+
+
+\subsubsection{Logical not: `\protect\protprol{!}'}
+\label{man:lognot-op}
+
+The operand to a logical not expression `\prol{!X}' is converted to
+\prol{bool}; the expression has type \prol{bool}. If the value of \prol{X}
+is \prol{true}, the expression has value \prol{false}, and vice versa.
+
+
+\subsubsection{Arithmetic operators}
+\label{man:arith-op}
+
+The binary arithmetic operators are addition `\prol{+}', subtraction
+`\prol{-}', multiplication `\prol{*}', division `\prol{/}', remainder
+`\prol{\%}', left `\prol{<<}' and right `\prol{>>}' shift, bitwise and
+`\prol{\&}', bitwise or `\prol{|}', and bitwise exclusive or `\prol{\^}'.
+The unary arithmetic operators are unary plus `\prol{+}' and minus
+`\prol{-}' and bitwise not `\prol{\~}'.
+
+The operands to most arithmetic operators must have integral type. The type
+of a unary arithmetic expression is the type of its operand; the type of a
+binary arithmetic expression is the common type of its operands.
+
+Binary addition and subtraction also support some combinations of pointer
+operands. In an addition expression `\prol{A~+~B}':
+\begin{itemize}
+\item Either \prol{A} or \prol{B} may be a pointer; the other must have
+integral type. The result has the type of the pointer operand.
+\end{itemize}
+In a subtraction expression `\prol{A - B}':
+\begin{itemize}
+\item \prol{A} and \prol{B} may be pointers of the same type. The result
+has type \prol{int}.
+\item \prol{A} may have pointer type and \prol{B} may have integral type.
+The result's type is the type of \prol{A}.
+\end{itemize}
+
+All arithmetic operators behave as they do in C.
+
+
+\subsubsection{Array reference: `\protect\protprol{[]}'}
+\label{man:array-op}
+
+The bracket operator `\prol{[]}' expresses array reference. The expression
+`\prol{X[Y]}' acts differently depending on whether the left operand
+\prol{X} is a type or value expression.
+
+If \prol{X} is a value expression, then it must have some pointer or array
+type \prol{*T}, but not \prol{*void}. The right operand \prol{Y} must have
+some arithmetic type, and the type of the whole expression is \prol{T}. The
+expression behaves similar to the similar array reference in C.
+
+If \prol{X} is a type expression, then \prol{Y} must evaluate to a
+nonnegative static integer constant. If so, `\prol{X[Y]}' is a type
+expression defining the type ``array of \prol{Y}
+\prol{X}s''~(\rf{man:array-type}).
+
+
+\subsubsection{Assignment: `\protect\protprol{=}'}
+\label{man:assign-op}
+
+The assignment operator `\prol{=}' expresses variable assignment. In an
+expression `\prol{X = Y}', \prol{X} must be an lvalue~(\rf{man:lvalue});
+\prol{Y} is converted to the type of \prol{X}. The expression has the type
+of \prol{X}; its value is the value of \prol{X} after the assignment is
+performed.
+
+
+\subsubsection{Compound assignment}
+\label{man:comp-assign-op}
+
+A compound assignment expression `\prol{X @= Y}', where \prol{@} is a
+binary arithmetic operator~(\rf{man:arith-op}), is exactly equivalent to
+the expression `\prol{X = X @ Y}' except that \prol{X} is evaluated only
+once.
+
+
+\subsubsection{Increment and decrement: `\protect\protprol{++}',
+`\protect\protprol{\protect\prolhyphen\protect\prolhyphen}'}
+\label{man:incr-decr-op}
+
+The increment and decrement operators `\prol{++}' and `\prol{--}' are used to
+increment or decrement an lvalue by 1. Their operand must be an lvalue with
+arithmetic or pointer type; the result of the expression has the same type.
+The following table shows equivalent expressions for each increment and
+decrement operator, except that postfix increment and decrement evaluate
+their operand only once.
+\begin{center}
+\begin{tabular}{l@{~~$\equiv$~~}l}
+\prol{++X}	& \prol{X += 1} \\
+\prol{--X}	& \prol{X -= 1} \\
+\prol{X++}	& \prol{let \v{temp} = X in X += 1, \v{temp} end} \\
+\prol{X--}	& \prol{let \v{temp} = X in X -= 1, \v{temp} end} \\
+\end{tabular}
+\end{center}
+
+\finishdocument

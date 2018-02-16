@@ -1,0 +1,143 @@
+dnl Process this file with autoconf to produce a configure script.
+AC_INIT(NEWS)
+AM_INIT_AUTOMAKE(prolac, 0.0.5)
+AM_CONFIG_HEADER(config.h)
+
+AC_PROG_CC
+AC_PROG_CPP
+AC_PROG_CXX
+AC_PROG_CXXCPP
+
+if test -n "$GCC" ; then
+  CC="$CC -Wall"
+  CXX="$CXX -Wall"
+  CPP="$CPP -x c"
+fi
+
+
+dnl
+dnl <new> and/or <new.h>
+dnl
+
+AC_LANG_CPLUSPLUS
+AC_CACHE_CHECK([whether <new> works], ac_cv_good_new_hdr,
+[AC_TRY_LINK([#include <new>], [
+  int a;
+  int *b = new(&a) int;
+  return 0;
+], ac_cv_good_new_hdr=yes, ac_cv_good_new_hdr=no)])
+if test "$ac_cv_good_new_hdr" = yes; then
+   AC_DEFINE(HAVE_NEW_HDR, 1, [Define if <new> exists and works.])
+fi
+AC_CHECK_HEADERS(new.h)
+
+
+dnl
+dnl integer types
+dnl
+
+AC_CHECK_HEADERS(inttypes.h, have_inttypes_h=yes, have_inttypes_h=no)
+AC_CHECK_HEADERS(sys/types.h, have_sys_types_h=yes, have_sys_types_h=no)
+
+if test $have_inttypes_h = no -a $have_sys_types_h = yes; then
+    AC_CACHE_CHECK([for uintXX_t typedefs], ac_cv_uint_t,
+    [AC_EGREP_HEADER(dnl
+changequote(<<,>>)<<(^|[^a-zA-Z_0-9])uint32_t[^a-zA-Z_0-9]>>changequote([,]),
+    sys/types.h, ac_cv_uint_t=yes, ac_cv_uint_t=no)])
+fi
+if test $have_inttypes_h = no -a $have_sys_types_h = yes -a "$ac_cv_uint_t" = no; then
+    AC_CACHE_CHECK([for u_intXX_t typedefs], ac_cv_u_int_t,
+    [AC_EGREP_HEADER(dnl
+changequote(<<,>>)<<(^|[^a-zA-Z_0-9])u_int32_t[^a-zA-Z_0-9]>>changequote([,]),
+    sys/types.h, ac_cv_u_int_t=yes, ac_cv_u_int_t=no)])
+fi
+if test $have_inttypes_h = yes -o "$ac_cv_uint_t" = yes; then
+    :
+elif test "$ac_cv_u_int_t" = yes; then
+    AC_DEFINE(HAVE_U_INT_TYPES, 1, [Define if you have u_intXX_t types but not uintXX_t types.])
+else
+    AC_MSG_WARN([
+=========================================
+
+Neither uint32_t nor u_int32_t defined by <inttypes.h> or <sys/types.h>!
+Assuming "short" has 16 bits and "int" has 32 bits.
+
+=========================================])
+    AC_DEFINE(HAVE_FAKE_INT_TYPES, 1, [Define if intXX_t types are not available.])
+fi
+
+AC_CHECK_TYPES(uintptr_t, [], [],
+[#if HAVE_INTTYPES_H
+# include <inttypes.h>
+#endif
+#if HAVE_SYS_TYPES_H
+# include <sys/types.h>
+#endif
+])
+
+AC_CHECK_SIZEOF(void *)
+AC_CHECK_SIZEOF(unsigned long)
+AC_CHECK_SIZEOF(unsigned int)
+
+
+dnl
+dnl Linux kernel
+dnl
+
+AC_ARG_WITH(linux,
+[  --with-linux[=DIR]      Linux kernel source is in DIR [DIR=/usr/src/linux]], :, with_linux=yes)
+
+AC_MSG_CHECKING(for Linux kernel includes)
+LINUX_INCLUDE=
+if test "x$with_linux" = xno; then
+  AC_MSG_RESULT(no)
+elif test "x$with_linux" != xyes; then
+  AC_DEFINE(HAVE_LINUX)
+  LINUX_INCLUDE=-I$with_linux/include
+  AC_MSG_RESULT($with_linux/include)
+elif test -d /usr/src/linux/include; then
+  AC_DEFINE(HAVE_LINUX)
+  LINUX_INCLUDE=-I/usr/src/linux/include
+  AC_MSG_RESULT(/usr/src/linux/include)
+else
+  AC_MSG_RESULT(no)
+fi
+AC_SUBST(LINUX_INCLUDE)
+
+dnl
+dnl `strip'
+dnl
+
+AC_PATH_PROG(STRIP, strip)
+
+AC_CACHE_CHECK(for debugging-only strip, ac_cv_strip_debug,
+[AC_LANG_C
+ac_cv_strip_debug=true
+cat > conftest.$ac_ext <<EOF
+[#]line __oline__ "configure"
+#include "confdefs.h"
+int main() { return 0; }
+EOF
+if AC_TRY_EVAL(ac_compile); then
+  if $STRIP -g conftest.o 2>&5; then
+    ac_cv_strip_debug="$STRIP -g"
+  elif $STRIP -d conftest.o 2>&5; then
+    ac_cv_strip_debug="$STRIP -d"
+  fi
+fi
+rm -f conftest*])
+STRIP_DEBUG=$ac_cv_strip_debug
+AC_SUBST(STRIP_DEBUG)
+
+dnl
+dnl other programs
+dnl
+
+AC_PATH_PROGS(PERL, perl5 perl)
+AC_PATH_PROGS(ETAGS, etags)
+
+dnl
+dnl Output
+dnl
+
+AC_OUTPUT(Makefile prolacc/Makefile linuxtcp/Makefile linuxtcp/control/Makefile linuxtcp/src/Makefile oldtcp/Makefile oldtcp/linuxtcp/Makefile)

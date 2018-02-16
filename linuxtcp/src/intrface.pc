@@ -1,0 +1,85 @@
+#ifndef INTRFACE_PC
+#define INTRFACE_PC
+#define ISS_SERVER	481
+#define ISS_CLIENT	1234
+
+module TCPInterface
+has .TCB, .Socket, .Output, .Input, .Segment, .Timeout, Headers.TCP,
+    .Statistics
+{
+  
+  static quick-timeout ::= Timeout().quick;
+  static fast-timeout ::= Timeout().fast;
+  static slow-timeout ::= Timeout().slow;
+  
+  static poll ::=
+    false;
+    /*
+    let seg :> *Segment, tcb :> *TCB in
+      { 
+	seg = tcp_poll(&tcb);
+      },
+      seg ==> Input.run(seg, tcb)
+    end;
+    */
+
+  static find-tcb(seg :> *Segment) :> *TCB ::= 
+    let th = seg->_tcp_header, tcb :> *TCB in {
+      tcb = tcb_demultiplex(th);
+    }, tcb
+    end;
+    
+  static refuse_connection(seg :> *Segment) ::=
+    { PDEBUG("refusing connection.\n"); }, true;
+  
+  
+  static accept-wait(sock :> *Socket) :> *Socket ::=
+    poll,
+    let newsock = sock->queue in
+      ((newsock && (newsock->tcb->established || newsock->tcb->close-wait))
+       ==> newsock)
+      ||| accept-wait(sock)
+    end;
+  
+  static accept(listener :> *Socket) :> *Socket ::= 
+#ifdef PRINT
+    listener->tcb->print,
+#endif
+    accept-wait(listener);
+  
+  static write-wait(tcb :> * TCB) :> int ::=
+    poll,
+    (tcb->send-idle ==> 0)
+    ||| write-wait(tcb);
+  
+  static write(sock :> *Socket, d :> * char, n :> int) :> int ::=
+    let b =sock->user-write(d, n) in
+      Output(sock->tcb).do,
+      b
+    end;
+
+  static close-poll(sock :> *Socket) ::= 
+    sock->tcb->time-wait ==> true
+    ||| sock->tcb->closed ==> true
+    ||| false;
+  
+  static close(sock :> *Socket) ::= 
+    sock->user-close,
+    {PDEBUG("intrface.pc:close\n");}
+    Output(sock->tcb).do,
+    0;
+  
+  static wrapup-wait(tcb :> *TCB) ::=
+    (tcb->closed ==> tcb->free)
+    ||| (poll, wrapup-wait(tcb));
+  
+  static wrapup(sock :> *Socket) ::=
+    sock->tcb->print, /*tcb->print-stat,*/
+    wrapup-wait(sock->tcb);
+
+  static shutdown ::=
+    TCB.free-all(TCB._first-tcb);
+  
+};
+
+#endif

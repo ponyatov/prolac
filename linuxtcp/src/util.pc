@@ -1,0 +1,24 @@
+#ifndef UTIL_PC
+#define UTIL_PC
+
+module Util {
+  
+  static (htons)(m :> ushort) :> ushort ::=
+    let q :> ushort in { q = htons(m); }, q end;
+  static (ntohs)(m :> ushort) :> ushort ::=
+    let q :> ushort in { q = ntohs(m); }, q end;
+  static (htonl)(m :> ulong) :> ulong ::=
+    let q :> ulong in { q = htonl(m); }, q end;
+  static (ntohl)(m :> ulong) :> ulong ::=
+    let q :> ulong in { q = ntohl(m); }, q end;
+  
+  static assertion(b :> bool) ::=
+    { assert(b); };
+  
+} inline all using all;
+
+#undef htons
+#undef ntohs
+#undef htonl
+#undef ntohl
+#endif

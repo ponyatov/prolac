@@ -1,0 +1,296 @@
+#ifndef OUTPUT_PC
+#define OUTPUT_PC
+
+#define TCP_TOS			0x10
+#define TCP_TTL			64
+
+module Base.Output has .TCB, Headers.TCP, .Segment {
+  
+  field tcb :> *TCB using all;
+  field send-every-nonempty-segment :> bool;
+  field datalen-left :> uint;
+  field sending-reset :> bool;
+
+  exception error;
+  
+  constructor(t :> *TCB) ::=
+    sending-reset = false,
+    tcb = t;
+  
+  
+  do ::=
+    // XXX BSD returns to slow start in some cases
+    why(97),
+#ifdef PRINT
+    tcb->print,
+#endif
+    initialize,
+    send-loop,
+    why(98);
+  
+  //why(x :> int) ::= { printk("why %d\n", x); };
+  why(x :> int) ::= true;
+  
+  initialize {
+    
+    initialize ::=
+      initialize-send-window-avail,
+      send-every-nonempty-segment = check-send-every-nonempty-segment,
+      (send-every-nonempty-segment ==> why(99999)),
+      datalen-left = check-datalen-left,
+      set-receive-window-conservatively;
+    
+    
+    // Should we always send a nonempty segment?
+    check-send-every-nonempty-segment :> bool ::=
+      force-send || retransmitting
+      || (can-send-everything && send-everything-now);
+    
+    can-send-everything :> bool ::=
+      send-window-avail >= socket->sendable-length
+      && socket->sendable-length;
+    
+    send-everything-now :> bool ::=
+      send-idle || tcb->allow-no-delay;
+    
+    
+    check-datalen-left :> uint ::=
+      socket->sendable-length;
+    
+  }
+  
+  
+  send-loop ::=
+    (real-send-loop catch error);
+  real-send-loop ::=
+    should-send ==> send, real-send-loop
+    ||| do-not-send;
+  
+  
+  flags-seqlen :> int ::=
+    (should-send-syn ? 1 : 0) + (should-send-fin ? 1 : 0);
+  
+  should-send :> bool ::=
+    let l = min(datalen-left, send-window-avail), s = send-window-avail in
+      ((l && (send-every-nonempty-segment || send-this-nonempty-segment(l)))
+       ==> why(1))
+      || (need-window-update ==> why(2))
+      || (ack-pending ==> why(3))
+      || (will-send-syn ==> why(4))
+      || (will-send-fin(l) && should-send-fin-now ==> why(6))
+    end;
+  
+  send-this-nonempty-segment(seqlen :> uint) :> bool ::=
+    seqlen >= tcb->mss	// note: slightly different from `datalen >= mss'
+    || seqlen >= tcb->max-send-window-offered / 2;
+  
+  should-send-fin-now :> bool ::=
+    /* XXX BSD checks (for retransmitting) snd_nxt == snd_una;
+       we check snd_next < snd_max */
+    !have-sent-fin || retransmitting;
+  
+  
+  do-not-send ::= /* XXX v2p862 enter persist */
+    // Check to see if we're in the `closed' state. If so, send a RST.
+    (closed ==> send-ack-reset(tcb->snd_next, tcb->rcv_next));
+  
+
+ suggested-size :> uint ::=
+    datalen-left ==> (tcb->mss + 40 + 12 + 20)
+    ||| max-ack-size;
+
+  send ::=
+    let send-seg = Segment.new(suggested-size) in
+      (send-seg == 0 ==> error),
+      (!build-headers(send-seg) 
+       ==> {printk("Couldn't build header. Freeing...\n"); }, 
+           send-seg->free-write, error),
+      let header-len = send-seg->data-length in
+	let data-len = calculate-data-length(send-seg) in
+          (data-len + header-len > send-seg->max-length 
+	   ==> {printk("Writing over-full packet. Freeing...\n"); },
+	       send-seg->free-write, error),
+	  (data-len ==> do-data(send-seg, data-len))
+	  || do-no-data(send-seg),
+          //{printk("<1>prolac: sending segment. length=%d\n", data_len);},
+	  tcb->send-segment(send-seg),
+          send-seg = 0,
+	  datalen-left -= data-len
+	end
+      end
+    end;
+
+  build-headers(seg :> *Segment) :> bool ::= 
+    build-ip-header(seg)
+    && build-tcp-header(seg);
+
+  build-ip-header(seg :> *Segment) :> bool ::=
+    /*
+     * We can play fast and loose with the length here, 
+     * because ip_queue_xmit adjusts it to proper value later.
+     */
+    let tmp :> int, 
+  	dev :> uint, 
+	rp :> uint, 
+        truesize = seg->max-length in
+      dev = 0,
+      rp = 0,
+      { 
+	tmp = ip_build_header((struct sk_buff *)seg, 
+			      0, tcb->daddr, 
+			      (void **)&dev, 
+			      IP_PROTO_TCP,
+			      NULL, truesize, TCP_TOS, TCP_TTL, (void **)&rp); 
+      },
+      (tmp >= 0)
+    end;
+
+  build-tcp-header(seg :> *Segment) :> bool ::=
+    let size = TCP.header-size in
+      { 
+        seg->_tcp_header = (void *)skb_put((struct sk_buff *)seg, size); 
+	memset(seg->_tcp_header, 0, size);
+      },
+      size += build-tcp-options(seg),
+      seg->_tcp_header->set-offset(size),
+      true
+    end;
+  
+  
+  build-tcp-options(seg :> *Segment) :> int ::=
+    0;
+
+  calculate-data-length(seg :> *Segment) :> int ::=
+    let syn-seqno = will-send-syn ? 1 : 0 in
+      let data-len = min(datalen-left, send-window-avail - syn-seqno) in
+        min(data-len, seg->free-space)
+      end
+    end;
+  
+  
+  do-data(seg :> *Segment, data-len :> int) ::=
+    (sending-everything(data-len) ==> seg->set-psh),
+    //seg->set-psh,
+    socket->send-data-into(seg, data-len);
+  
+  sending-everything(data-len :> int) :> bool ::=
+    socket->sendable-length <= data-len;
+  
+  do-no-data(seg :> *Segment) ::= true; /* STAT */
+  
+  // Magic values derived from Linux TCP
+  max-reset-size :> uint ::= 171;
+  max-ack-size :> uint ::= 171;
+  
+  send-ack-reset(seqno :> seqint, ackno :> seqint) ::=
+    sending-reset = true,
+    let send = Segment.new(max-reset-size) in
+      (send == 0 ==> error),
+      (!build-headers(send) 
+       ==> {printk("Couldn't build headers. Freeing...\n"); }, 
+           send->free-write, error),
+      send->_tcp_header->seqno = seqno,
+      send->set-rst,
+      send->set-ack(ackno),
+      tcb->send-reset-segment(send),
+    end catch error;
+  
+  send-reset(seqno :> seqint) ::=
+    sending-reset = true,
+    let send = Segment.new(max-reset-size) in
+      (send == 0 ==> error),
+      (!build-headers(send)
+       ==> {printk("Couldn't build headers. Freeing...\n"); }, 
+           send->free-write, error),
+      send->_tcp_header->seqno = seqno,
+      send->set-rst,
+      tcb->send-reset-segment(send),
+    end catch error;
+  
+} inline all
+  inline[4] do;
+
+
+module Output-M.TCB :> P-TCB has Segment {
+  
+  field fin-seqno :> seqint;
+  field snd-wnd-avail :> int;
+  static F.have-fin-seqno :> ushort ::= P-TCB.max-flag * 2;
+  static F.have-sent-fin :> ushort ::= P-TCB.max-flag * 4;
+  static F.force-send :> ushort ::= P-TCB.max-flag * 8;
+  static max-flag :> ushort ::= F.force-send;
+  
+  
+  force-send :> bool ::= test-flag(F.force-send);
+  
+  // Calculate the send window
+  initialize-send-window-avail {
+    
+    initialize-send-window-avail ::=
+      (force-send ==> init-force-window)
+      || let win = super.send-window-avail in
+           /* win < 0 ==> snd-wnd-avail = 0
+           ||| win == 0 ==> start-retransmission, cancel-retransmit, snd-wnd-avail = 0 // XXX??
+           ||| snd-wnd-avail = win */
+           win < 0 ==> start-retransmission, cancel-retransmit, snd-wnd-avail = 0 // XXX??
+           ||| snd-wnd-avail = win
+         end;
+    
+    init-force-window :> int ::=
+      (super.send-window-avail > 0 ==> 
+       mark-out-of-band, super.send-window-avail)
+      ||| force-window-persist;
+    
+    force-window-persist :> int ::= 1;
+    
+    mark-out-of-band ::= cancel-persist /* XXX rxtshift = 0 v2p854 */;
+    
+  }
+  
+  send-window-avail :> int ::= snd-wnd-avail;
+  
+  
+  mark-close-after(d :> uint) ::=
+    /* XXX consistency checks? */
+    inline super.mark-close-after(d),
+    !test-flag(F.have-fin-seqno) ==> (set-flag(F.have-fin-seqno), 
+				      fin-seqno = snd_next + d);
+  
+  should-send-syn :> bool ::= will-send-syn;
+  will-send-syn :> bool ::= snd_next == iss;
+  should-send-fin :> bool ::=
+    fin-wait-1 || closing || last-ack;
+  
+  // Will we send a FIN as the end of a segment with `seqlen' sequence numbers?
+  will-send-fin(seqlen :> uint) :> bool ::=
+    test-flag(F.have-fin-seqno)
+    && snd_next + seqlen == fin-seqno;
+  
+  have-sent-fin :> bool ::= test-flag(F.have-sent-fin);
+  
+  
+  send-segment(s :> *Segment) ::=
+    //{ PDEBUG("%s send window avail %u\n", program_name, snd_wnd_avail); }
+    (will-send-syn ==> s->set-syn),
+    (test-flag(F.have-fin-seqno) ==> maybe-set-fin(s)),
+    (have-received-syn ==> s->set-ack(rcv_next)),
+    snd-wnd-avail -= s->seqlen,
+    inline super.send-segment(s);
+  
+  maybe-set-fin(s :> *Segment) ::=
+    snd_next + s->seqlen == fin-seqno
+    // Don't send the FIN if it doesn't fit in the window    
+    && s->seqlen < send-window-avail
+    ==> set-flag(F.have-sent-fin), s->set-fin;
+
+  
+} inline (mark-close-after, will-send-fin)
+  hide (maybe-set-fin);
+
+
+// hookup
+module Output-M.P-TCB ::= CUR_TCB;
+#undef CUR_TCB
+#define CUR_TCB		Output-M.TCB
+#define CUR_OUTPUT	Base.Output
+#endif

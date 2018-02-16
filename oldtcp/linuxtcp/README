@@ -1,0 +1,9 @@
+This directory contains an older TCP. It is semi-integrated with Linux 2.0
+-- it can talk to the lower levels of network processing (IP, etc.), but
+not the higher levels (sockets). This is the TCP whose performance
+measurements we reported in the SIGCOMM paper.
+
+This TCP does compile, but this preliminary release does not include the
+Linux 2.0 kernel patch it needs to function.
+
+This TCP contains some work by David R. Montgomery.

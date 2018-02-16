@@ -1,0 +1,135 @@
+#ifndef RTT_PC
+#define RTT_PC
+#include "timeout.pc"
+
+module RTTSmoothM.TCB :> ParentTCB has .Socket {
+  
+  field _scaled_rtt :> uint @ 204;
+  field _scaled_rtt_variance :> uint @ 248;
+  
+  constructor(s :> *Socket) ::=
+    ParentTCB(s),
+    _scaled_rtt = 0,
+    _scaled_rtt_variance = 0;
+
+  // FIELDS
+  
+  unscaled-rtt :> uint ::=
+    _scaled_rtt / 8;
+  unscaled-rtt-variance :> uint ::=
+    _scaled_rtt_variance / 4;
+  scale-rtt(x :> uint) :> uint ::=
+    x * 8;
+  scale-rtt-variance(x :> uint) :> uint ::=
+    x * 4;
+  
+  // ESTIMATED RTT
+  
+  estimated-rtt :> short ::=
+    unscaled-rtt + _scaled_rtt_variance;
+  
+  min-rtt :> short ::= 2;
+  
+  
+  // UPDATING ESTIMATED RTT
+  
+  transparently-revoke-rtt-estimate ::=
+    _scaled_rtt_variance += unscaled-rtt,
+    _scaled_rtt = 0;
+  
+  update-rtt-estimate(rtt :> int) ::=
+    (_scaled_rtt ? updaters.update(rtt - 1) : updaters.init(rtt - 1));
+  
+  updaters {
+    
+    init(rtt :> uint) ::=
+      _scaled_rtt = scale-rtt(rtt),
+      _scaled_rtt_variance = scale-rtt-variance(rtt/2);	// linux does rtt
+    
+    update(rtt :> uint) ::=
+      // Want _scaled_rtt_new = rtt/8 + 7*_scaled_rtt/8.
+      // Therefore, _scaled_rtt_new = _scaled_rtt + (rtt - _scaled_rtt)/8.
+      // This incremental value is `delta'.
+      let delta = unscaled-rtt - _scaled_rtt / 8 in
+        _scaled_rtt = max((int)(_scaled_rtt + delta), 1),
+        ((int)delta < 0 ==> delta = -delta),
+        delta -= unscaled-rtt-variance,
+        _scaled_rtt_variance = max((int)(_scaled_rtt_variance + delta), 1)
+      end;
+    
+  }
+  
+  
+  print ::=
+    inline super.print,
+    { PDEBUG("     srtt %u var. %u\n", _scaled_rtt, _scaled_rtt_variance); };
+  
+} inline (updaters.all)
+  hide ("TCB._*", unscaled-rtt, unscaled-rtt-variance,
+	scale-rtt, scale-rtt-variance, updaters);
+
+
+module RTTBSDMeasureM.TCB :> ParentTCB
+has .Socket
+{
+  
+  field _timing_rtt :> short;
+  field _timing_seqno :> seqint;
+  
+  constructor(s :> *Socket) ::=
+    ParentTCB(s),
+    _timing_rtt = 0,
+    _timing_seqno = 0;
+  
+  
+  clear-timing-rtt ::= _timing_rtt = 0;
+  
+  start-rtt-timer(seqno :> seqint) ::=
+    _timing_rtt = 1,
+    _timing_seqno = seqno;
+  
+  slow-timer ::=
+    super.slow-timer,
+    (_timing_rtt ==> _timing_rtt++);
+  
+  retransmit-alarm ::=
+    super.retransmit-alarm,
+    _timing_rtt = 0;
+  
+  
+  // start timing when we send a new segment
+  send-hook(seqlen :> uint) ::=
+    inline super.send-hook(seqlen),
+    (seqlen && !retransmitting && !_timing_rtt ==>
+     start-rtt-timer(_snd_nxt - seqlen));
+  
+  // end timing when we get an ACK for the timed seqno
+  new-ack-hook(ackno :> seqint) ::=
+    (_timing_rtt && ackno > _timing_seqno ==>
+     update-rtt-estimate(_timing_rtt), _timing_rtt = 0),
+    inline super.new-ack-hook(ackno);
+  
+};
+
+
+module RTTLinuxMeasureM.TCB :> ParentTCB
+has .Segment
+{
+  
+  receive-hook(seg :> *Segment) ::=
+    (!retransmitting ==>
+     let this_rtt :> uint in
+       { this_rtt = tcp_time_stamp - seg->when; },
+       update-rtt-estimate(this_rtt)
+     end),
+    inline super.receive-hook(seg);
+  
+};
+
+// hookup
+module RTTSmoothM.ParentTCB ::= CUR_TCB;
+module RTTBSDMeasureM.ParentTCB ::= RTTSmoothM.TCB;
+module RTTLinuxMeasureM.ParentTCB ::= RTTSmoothM.TCB;
+#undef CUR_TCB
+#define CUR_TCB		RTTLinuxMeasureM.TCB
+#endif

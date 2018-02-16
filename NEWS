@@ -1,0 +1,26 @@
+Prolac NEWS
+
+Version 0.0.5   13.Nov.2004
+
+* Bug fixes.
+
+
+Version 0.0.4   25.Jul.2004
+
+* Compiles with newer GCCs.
+
+
+Version 0.0.3   14.Aug.2002
+
+* Bug fixes.
+
+
+Version 0.0.2   .Apr.2000
+
+* Changes to allow compilation with gcc-2.95.2. Problem reported by Phillip
+  Stanley-Marbell <narteh@ece.rutgers.edu>.
+
+
+Version 0.0.1   5.Sep.1999
+
+* Initial release.

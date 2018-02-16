@@ -1,0 +1,132 @@
+#ifndef HEADER_PC
+#define HEADER_PC
+#include "util.pc"
+#define EP_IP           0x0800
+#define IP_PROTO_TCP	0x6
+
+module Headers.Ether has Byte-Order {
+  field dst :> uchar[6];
+  field src :> uchar[6];
+  field proto :> ushort;
+  
+  init ::= proto = htons(EP_IP),
+    { memcpy(is_server ? dst : src, CLIENT_ETH_ADDR, 6);
+      memcpy(is_server ? src : dst, SERVER_ETH_ADDR, 6); };
+  
+};
+
+module Headers.Pseudo has IP, Byte-Order, Compile-Options, Checksum {
+  field src :> uint;
+  field dst :> uint;
+  field zero :> uchar;
+  field prot :> uchar;
+  field len :> ushort;
+
+  static size :> int ::= 12;
+
+  constructor(ip :> *IP) ::=
+    src = ip->src,
+    dst = ip->dst,
+    zero = 0,
+    prot = IP_PROTO_TCP,
+    len = htons(ip->len - ip->hl);
+
+  calculate-checksum(c :> *Checksum) ::=
+    do-tcp-checksum ==> c->do(&src, size);
+};
+
+
+module Headers.IP has Byte-Order, Compile-Options, Checksum {
+  
+  field v_hl :> uchar;
+  field tos :> uchar;
+  field len :> ushort;
+  field id :> ushort;
+  field frag-off :> ushort;
+  field ttl :> uchar;
+  field p :> uchar;
+  field cksum :> ushort;
+  field src :> uint;
+  field dst :> uint;
+
+  // version and header length are embedded in a single char  
+  v :> uchar ::= (v_hl >> 4) & 0xF;
+  hl :> uchar ::= (v_hl & 0xF) * 4;
+  
+  fragmented ::= frag-off & 0x1FFF;
+  
+  static header-size :> int ::= 20;
+  static pseudo-size :> int ::= 12;
+  
+
+  // HOST TO NET TO HOST
+  net-to-host :> bool ::=
+    	len = ntohs(len), frag-off = ntohs(frag-off), id = ntohs(id), true;
+  host-to-net :> bool ::=
+    	len = htons(len), frag-off = htons(frag-off), id = htons(id), true;
+  
+} hide (frag-off);
+
+
+module Headers.TCP has IP, Byte-Order, Compile-Options, Checksum {
+  
+  field sport :> ushort;
+  field dport :> ushort;
+  field seqno :> seqint;
+  field ackno :> seqint;
+  field offset :> uchar;
+  field fv :> uchar;
+  field window :> ushort;
+  field cksum :> ushort;
+  field urp :> ushort;
+  
+  static header-size :> int ::= 20;
+  static max-window-size :> int ::= 65535;
+  
+  header-length :> int ::= (offset >> 2) & ~0x3;
+  set-offset(i :> uchar) ::=
+    { assert( ((i & 0xC3) == 0) ); }
+    offset = i << 2;
+  
+  V {
+    static fin :> int ::= 1;
+    static syn :> int ::= 2;
+    static rst :> int ::= 4;
+    static psh :> int ::= 8;
+    static ack :> int ::= 16;
+    static urg :> int ::= 32;
+  }
+  
+  fin :> bool ::= fv & V.fin;
+  syn :> bool ::= fv & V.syn;
+  rst :> bool ::= fv & V.rst;
+  psh :> bool ::= fv & V.psh;
+  ack :> bool ::= fv & V.ack;
+  urg :> bool ::= fv & V.urg;
+  
+  set-fin ::= fv |= V.fin;   clear-fin ::= fv &= ~V.fin;
+  set-syn ::= fv |= V.syn;   clear-syn ::= fv &= ~V.syn;
+  set-rst ::= fv |= V.rst;   clear-rst ::= fv &= ~V.rst;
+  set-psh ::= fv |= V.psh;   clear-psh ::= fv &= ~V.psh;
+  set-ack ::= fv |= V.ack;   clear-ack ::= fv &= ~V.ack;
+  set-urg ::= fv |= V.urg;   clear-urg ::= fv &= ~V.urg;
+  
+  any-flags :> bool ::= fv != 0;
+  expected-packet-flags :> bool ::=
+    (fv & (V.fin | V.syn | V.rst | V.ack | V.urg)) == V.ack;
+
+  // HOST TO NET TO HOST
+  net-to-host :> bool ::=
+    seqno = ntohl(seqno), ackno = ntohl(ackno), window = ntohs(window),
+    sport = ntohs(sport), dport = ntohs(dport), true;
+  host-to-net :> bool ::=
+    seqno = htonl(seqno), ackno = htonl(ackno), window = htons(window),
+    sport = htons(sport), dport = htons(dport), true;
+  
+  // PRINTING
+  print ::= true;
+  
+} inline all
+  hide (/*calculate-checksum, cksum,*/ fv);
+
+#endif

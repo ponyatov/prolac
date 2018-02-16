@@ -1,0 +1,7 @@
+This directory contains the Prolac language reference manual. The Adobe PDF
+file `refman.pdf' looks much prettier, but the LaTeX source is provided as
+well. (You will need to run LaTeX several times.)
+
+A paper on Prolac, and the Prolac TCP, was published in the 1999 SIGCOMM
+conference. It is also available on the Web at
+http://www.pdos.lcs.mit.edu/prolac/

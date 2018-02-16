@@ -1,0 +1,40 @@
+#ifndef PREDICT_PC
+#define PREDICT_PC
+#ifdef OPTIONS_PC
+#error "predict.pc should come before options.pc"
+#endif
+
+module HeaderPrediction.Input :> InputParent
+has Segment, .Reassembly, .Output {
+  
+  do-process-segment ::=
+    (predicted ==> fast-path)
+    || normal-path;
+  
+  predicted :> bool ::= 
+    established && expected-packet-flags &&
+    expected-seqno(seg->seqno) && ack-predicted && !reassembly-queue;
+  
+  ack-predicted :> bool ::=
+    valid-ack(seg->ackno) && !retransmitting;
+  
+  fast-path ::= /* STAT */
+    // NOTE: using mark-ack increases code duplication.
+    (unseen-ack(seg->ackno) ==> new-ack-hook(seg->ackno)),
+    // XXX checking congestion window
+    update-send-window(seg),
+    inline Reassembly(seg, tcb).easy-reassemble,
+    socket->mark-writable,
+    (socket->sendable || ack-pending ==> Output(tcb).run);
+  
+  normal-path ::=
+    inline super.do-process-segment;
+  
+} inline (predicted, ack-predicted, fast-path)
+  inline[0] normal-path;
+
+// hookup
+module HeaderPrediction.InputParent ::= CUR_INPUT;
+#undef CUR_INPUT
+#define CUR_INPUT	HeaderPrediction.Input
+#endif

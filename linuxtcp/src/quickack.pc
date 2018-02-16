@@ -1,0 +1,52 @@
+#ifndef QUICKACK_PC
+#define QUICKACK_PC
+
+
+module QuickAck.TCB :> ParentTCB has Segment {
+  
+  static F.quick-ack :> ushort ::= ParentTCB.max-flag * 2;
+  static max-flag :> ushort ::= F.quick-ack;
+  
+  test-quick-ack :> bool ::= test-flag(F.quick-ack);
+  mark-quick-ack ::= set-flag(F.quick-ack);
+  
+  send-hook(seqlen :> uint) ::=
+    inline super.send-hook(seqlen),
+    clear-flag(F.quick-ack);
+  
+} inline TCB.all inline (F.quick-ack, mark-quick-ack);
+
+
+module QuickAck.Reassembly :> ParentReassembly {
+
+  mark-ack-for-push ::=
+    mark-quick-ack;
+
+};
+
+
+module QuickAck.Timeout :> ParentTimeout has .TCB, .Output {
+  
+  quick  ::= super.quick, quick-loop(TCB._first-tcb);
+  
+  quick-loop(tcb :> *TCB) ::=
+    tcb == TCB._list-sentinel ==> false
+    ||| quick-ack(tcb), quick-loop(tcb->_next-tcb);
+  
+  quick-ack(tcb :> *TCB) ::=
+    (tcb->test-quick-ack ==> tcb->mark-pending-ack, Output(tcb).run);
+  
+} inline (quick-loop, quick-ack)
+  hide (quick-loop, quick-ack);
+
+// hookup
+module QuickAck.ParentTCB ::= CUR_TCB;
+module QuickAck.ParentReassembly ::= CUR_REASSEMBLY;
+module QuickAck.ParentTimeout ::= CUR_TIMEOUT;
+#undef CUR_TCB
+#undef CUR_REASSEMBLY
+#undef CUR_TIMEOUT
+#define CUR_TCB		QuickAck.TCB
+#define CUR_REASSEMBLY	QuickAck.Reassembly
+#define CUR_TIMEOUT	QuickAck.Timeout
+#endif

@@ -1,0 +1,349 @@
+#ifndef SEGMENT_PC
+#define SEGMENT_PC
+#define IP_PROTO_TCP		0x6
+#define AS_SK_BUFF_HEAD(q)	((struct sk_buff_head *)(q))
+#define AS_SK_BUFF(q)		((struct sk_buff *)(q))
+
+module SegmentList
+has Segment
+{
+  
+  field _next :> *Segment @ 0;
+  field _prev :> *Segment @ 4;
+  field _qlen :> uint @ 8;
+  
+  
+  // CREATION
+  
+  constructor ::=
+    initialize;
+  
+  initialize ::=
+    { skb_queue_head_init(AS_SK_BUFF_HEAD(&self)); };
+  
+
+  // CHECKING
+  
+  head :> *Segment ::=
+    let s :> *Segment in
+      { s = (Segment *)skb_peek(AS_SK_BUFF_HEAD(&self)); }, s
+    end;
+  tail :> *Segment ::=
+    let s :> *Segment in
+      { s = (Segment *)skb_peek_tail(AS_SK_BUFF_HEAD(&self)); }, s
+    end;
+  
+  
+  // INSERTION, DELETION
+  
+  enqueue-head(l :> *Segment) ::=
+    { skb_queue_head(AS_SK_BUFF_HEAD(&self), AS_SK_BUFF(l)); };
+  enqueue-tail(l :> *Segment) ::=
+    { skb_queue_tail(AS_SK_BUFF_HEAD(&self), AS_SK_BUFF(l)); };
+  
+  
+  // PRINTING
+  
+  free-link-chain {
+    free-link-chain ::= help(_next);
+    
+    help(seg :> *Segment) ::=
+      seg ==>
+      let n = seg->next-segment in
+        seg->unlink,
+        { printk("Destroying link chain. Freeing...\n"); }
+        seg->free,
+	help(n),
+      end;
+  }
+  
+  print-list {
+    print-list ::= help(head);
+    help(seg :> *Segment) ::=
+      (seg ==> seg->print, help(seg->next-segment));
+  }
+  
+} hide "_*"
+  notusing all
+  inline all
+  inline[0] print-list;
+
+
+module Segment
+has Headers.IP, Headers.TCP,
+    Util, .Socket, .TCPFlags, SegmentList
+{
+  
+  /* Segment is a pun for Linux's struct sk_buff. */
+  /* All position offsets were obtained from Linux 2.2.11's headers. */
+  
+  field _next :> *Segment @ 0;
+  field _prev :> *Segment @ 4;
+  field _list :> *SegmentList @ 8;
+  field _sk :> *Socket @ 12;
+  
+  // HEADER POINTERS
+  field _tcp_header :> *TCP @ 28;
+  field _ip_header :> *IP using all @ 32;
+  
+  // PROTOCOL-SPECIFIC DATA AREA
+  // field _cb :> char[48] @ 44;
+  // A TCP segment in Linux 2.2 has _cb equal to a struct tcp_skb_cb; fields
+  // as follows:
+  field _seq :> seqint @ 60;	// first sequence number in packet
+  field _end_seq :> seqint @ 64; // last sequence number in packet (includes SYN/FIN)
+  field _flags :> TCPFlags using all @ 72;	// copy of flags in TCP header
+				// used in input & output (Linux: output only)
+  field _urg_ptr :> ushort @ 74; // copy of urgent pointer in TCP header
+				// used in input & output (Linux: output only)
+  field _ack_seq :> seqint @ 76;// copy of ackno in TCP header
+  
+  // REMAINDER OF struct sk_buff
+  field _len :> uint @ 92;	// length of packet data
+  field _csum :> uint @ 96;	// checksum
+  field _used :> /*volatile*/ char @ 100;	// data moved to user?
+  field _pkt_type :> uchar @ 103; // packet belongs to me?
+  field _ip_summed :> uchar @ 105; // IP checksummed already?
+  
+  // Data pointers
+  field _head :> *uchar @ 124;	// beginning of stored data
+  field _data :> *uchar @ 128;	// beginning of data
+  field _tail :> *uchar @ 132;	// end of data
+  field _end :> *uchar @ 136;	// end of stored data
+  
+  
+  // FIELDS
+  
+  // Linux treats sk_buff data as read-only. Probably a good idea.
+  seqno :> seqint ::= _seq;
+  ackno :> seqint ::= _ack_seq;
+  sport :> ushort ::= ntohs(_tcp_header->sport); // XXX
+  window :> ushort ::= ntohs(_tcp_header->window); // XXX
+  urp :> ushort ::= _urg_ptr;
+  
+  option-pointer :> *uchar ::=
+    (*uchar)((*void)_tcp_header) + TCP.min-header-size;
+  
+  len :> uint ::= _len;
+  data-length :> uint ::= len;
+  max-length :> uint ::= _end - _head;
+  free-space :> uint ::= _end - _tail;
+  
+  empty ::= len == 0;
+  
+  
+  // Sequence numbers consumed by this packet, including SYN and FIN. 
+  left :> seqint ::= _seq;
+  right :> seqint ::= _end_seq;
+  seqlen :> uint ::= _end_seq - _seq;
+  
+  
+  // XXX htonl???
+  set-seqno(a :> seqint) ::= _tcp_header->seqno = a;
+  set-ack(a :> seqint) ::= _tcp_header->set-ack, _tcp_header->ackno = a;
+  
+  
+  // TRIMMING XXX
+  
+  trim-syn ::= assertion(syn), trim-front-seqno(1), clear-syn;
+  
+  trim-front(a :> int) ::=
+    (_tcp_header ==> trim-front-seqno(a)), /* XXX linux doesn't need to check this */
+    _data += a;
+  
+  trim-front-seqno(a :> int) ::=
+    assertion(a < seqlen),
+    _seq += a,
+    (urg ==> _urg_ptr > a ? _urg_ptr -= a : clear-urg);
+  
+  trim-back(a :> int) ::=
+    assertion(a < seqlen),
+    (fin ==> clear-fin, trim-back(a - 1))
+    ||| (_tail -= a, _end_seq -= a, clear-psh);
+  
+  
+  // TRAVERSAL
+  
+  list-as-segment :> *Segment ::=
+    (*Segment)((*void)_list);
+  
+  next-segment :> *Segment ::=
+    _next == list-as-segment ? 0 : _next;
+  prev-segment :> *Segment ::=
+    _prev == list-as-segment ? 0 : _prev;
+  
+  insert-before(before-me :> *Segment) ::=
+    { skb_insert(AS_SK_BUFF(before_me), AS_SK_BUFF(&self)); };
+  
+  unlink ::=
+    { skb_unlink(AS_SK_BUFF(&self)); };
+  
+  
+  // CHECK-INCOMING
+  // Returns false on a poorly-formed packet.
+  
+  check-incoming {
+    
+    /* 
+     * We get a segment with:
+     * 1. _data pointing to the start of the IP header
+     * 2. _ip_header pointing to IP header.
+     * 3. _tcp_header pointing to TCP header.
+     */
+    
+    check-incoming :> bool ::= 
+      check-packet-for-me
+      && check-header-size
+      && check-checksum;
+    
+    check-packet-for-me :> bool ::=
+      _pkt_type == PACKET_HOST;	// PACKET_HOST in <linux/if_packet.h>
+    
+    check-header-size :> bool ::=
+      pull-up-ip-header,
+      _len >= TCP.min-header-size
+      && _tcp_header->header-size >= TCP.min-header-size
+      && _len >= _tcp_header->header-size;
+    
+    pull-up-ip-header ::=
+      /* Linux doesn't check that packet length is big enough for IP header */
+      { __skb_pull(AS_SK_BUFF(&self), (unsigned char *)_tcp_header - _data); };
+    
+    /* XXX we also pulled up the TCP header!! */
+    
+    check-checksum :> bool ::=
+      let checksum :> ushort in {
+	/* code like that in Linux tcp_v4_rcv */
+	switch (_ip_summed) {
+	 case CHECKSUM_NONE:
+	  _csum = csum_partial((char *)_tcp_header, _len, 0);
+         case CHECKSUM_HW:
+	  checksum = tcp_v4_check(_tcp_header, _len, _ip_header->saddr,
+				  _ip_header->daddr, _csum);
+	  break;
+	 default: /* CHECKSUM_UNNECESSARY */
+	  checksum = 0;
+	  break;
+	}
+      }, checksum == 0
+      end;
+    
+  }
+  
+  prepare-incoming ::=
+    let header-size = _tcp_header->header-size in
+      _seq = ntohl(_tcp_header->seqno),
+      _end_seq = _seq + (syn ? 1 : 0) + (fin ? 1 : 0) + _len - header-size,
+      _ack_seq = ntohl(_tcp_header->ackno),
+      _urg_ptr = ntohs(_tcp_header->urp),
+      _used = 0,
+      { __skb_pull(AS_SK_BUFF(&self), header_size); } // Linux doesn't
+    end;
+  
+  
+  // HOST TO NET
+  
+  host-to-net {
+    
+    host-to-net ::=
+      _tcp_header->host-to-net,
+      do-checksum;
+
+    do-checksum ::=
+      {
+	struct sk_buff *skb = AS_SK_BUFF(&self);
+	unsigned char *datap = (unsigned char *)(skb->h.th+1);
+	int datalen = skb->tail - datap;
+	skb->csum = 0;
+	if (datalen) {
+	  skb->csum = csum_partial(datap, datalen, 0);
+	}
+	tcp_send_check((void *)_tcp_header,
+		       _ip_header->saddr, _ip_header->daddr,
+		       skb->tail - (unsigned char *)skb->h.th, skb);
+      } true;
+
+
+  }
+  
+  
+  // ALLOCATION/DEALLOCATION
+  
+  static new(datalen :> uint) :> *Segment  ::=
+    let s :> *Segment in
+      { 
+	//atomic_inc(&skb_count);
+	s = (void *)alloc_skb(datalen, GFP_ATOMIC); /* XXX intr_count ???? */
+	if (s) {
+	  s->_ip_header = 0;
+	  s->_tcp_header =0;
+	}
+      }, s
+    end;
+
+  free ::=
+  {
+    struct sk_buff *skb = AS_SK_BUFF(&self);
+    
+    //atomic_dec(&skb_count);
+    if (!skb) {
+      printk("ERROR! trying to free a null pointer!\n");
+      printk("Inside %s\n", __PRETTY_FUNCTION__);
+    } else {
+
+      if (skb->next != 0 || skb->prev != 0) {
+	printk("WARNING! freeing linked segment.\n");
+      }
+      kfree_skb(skb);
+    }
+  };
+
+  
+  // ALLOCATING DATA
+
+  copy-into(off :> uint, here :> uint, into :> *Segment, into-off :> uint) ::= 
+  { 
+    if (here + into->_tail > into->_end) {
+      PDEBUG("ERROR! copy-into: here exceeds skbuff size.\n");
+      PDEBUG("Segment has room for max %d bytes\n",  into->_end - into->_head);
+      PDEBUG("Segment currently has room for %d more bytes\n", into->_end - into->_tail);
+      PDEBUG("segment has %d bytes already.\n", into->_tail - into->_data);
+      PDEBUG("trying to add %d more.\n", here);
+    }
+    else 
+      memcpy(skb_put(AS_SK_BUFF(into), here), _data + off, here); 
+  };
+  
+
+  // PRINTING
+  
+  print ::=
+    let len = data-length in
+      { PDEBUG(" %u+%u", _seqno, len); }
+    end;
+  
+  
+  force-implicit-rules ::=
+    fin, syn, rst, psh, ack, urg,
+    set-fin, set-syn, set-rst, set-psh, set-urg,
+    clear-fin, clear-syn, clear-urg,
+    expected-packet-flags;
+  
+} show (fin, syn, rst, psh, ack, urg,
+	set-fin, set-syn, set-rst, set-psh, set-urg,
+	clear-fin, clear-syn, clear-urg,
+	expected-packet-flags)
+  inline (seqlen, set-ack,
+	  trim-syn, trim-front, trim-front-seqno, trim-back,
+	  data_length,
+	  list-as-segment, next-segment, prev-segment, insert-before,
+	  unlink,
+	  check-incoming.all, prepare-incoming,
+	  host-to-net.all)
+  inline[0] print
+  hide ("_*", list-as-segment,
+	force-implicit-rules,
+	trim-front-seqno)
+  show _tcp_header;
+
+#endif

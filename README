@@ -1,0 +1,55 @@
+PROLAC TCP 0.0.4
+================
+
+THIS IS ALPHA SOFTWARE. It is being released in the hope that it is
+interesting. The most stable part of this package is the Prolac compiler.
+(Well, I guess the MOST stable part is the reference manual. The Emacs mode
+is probably next. So maybe the compiler is thirdmost stable.) 'linuxtcp',
+the Prolac TCP for Linux 2.2, probably has the best code of the several
+TCPs, but it might not even compile!
+
+Work on Prolac is no longer continuing.
+
+The package is laid out like this:
+
+./				This directory.
+
+./doc/				Prolac reference manual and so forth.
+
+./emacs/			A Prolac mode for Emacs.
+
+
+./prolacc/			prolacc, the Prolac compiler.
+
+
+./linuxtcp/			Prolac TCP for Linux 2.2. Current work focuses
+				here.
+./linuxtcp/kernelpatch/		Linux 2.2.11 kernel patch. Lets you select an
+				alternate TCP stack.
+./linuxtcp/control/		A copy of Linux 2.2.11 TCP, modified to run as
+				an alternate TCP stack.
+./linuxtcp/src/			Prolac TCP code, including programs to select
+				structure offsets and C code to support the
+				Prolac TCP module.
+
+
+./oldtcp/			Old TCPs in Prolac.
+./oldtcp/linuxtcp/		Prolac TCP for Linux 2.0.
+./oldtcp/usertcp/		Prolac TCP for user-level (uses BPF).
+
+================
+
+To compile: First type `./configure', then `make'. (If you have a Linux
+source distribution, but it's not in `/usr/src/linux', give the
+`--with-linux=SOURCEDIR' option to `./configure'.) You can also `make' in a
+particular subdirectory. Because this is an alpha release, most `make's
+will fail.
+
+Please feel free to email me about this package, but it is no longer
+supported.
+
+Eddie Kohler
+kohler@cs.ucla.edu
+
+http://www.cs.ucla.edu/~kohler/
+http://www.pdos.lcs.mit.edu/prolac/

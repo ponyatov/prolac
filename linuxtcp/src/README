@@ -1,0 +1,48 @@
+This directory contains a Prolac TCP specification that runs inside a Linux
+2.2 kernel.
+
+THIS CODE IS IN A PRE-ALPHA STATE!! IT CURRENTLY DOESN'T EVEN COMPILE!!
+
+The code in this directory fits into three categories:
+
+	1. Offset determination
+
+		This Prolac program is designed to mimic the structure
+		layout of Linux's TCP structures (struct sk_buff, struct
+		sock and struct tcp_opt). The C program `findoffsets.c' and
+		Perl script `adjustoffsets.pl' are used to automatically
+		find the correct offsets for Prolac data objects, then
+		patch them into the Prolac source code.
+
+	2. Prolac code
+
+		The Prolac code proper is stored in the `*.pc' files; there
+		are 23 files currently. This specification is being
+		gradually swapped over to Linux, so parts of it are dead
+		code, and parts of it do not compile.
+
+		The 23 `*.pc' files are combined using the C preprocessor.
+		Take a look at `all.pc' to see how this is done.
+
+		The C file `support.c' is included into the Prolac code.
+
+	3. Linux-like code
+
+		The C files `ptcp_*.c' are analogous to the `atcp_*.c'
+		files in the `linuxtcp/control' directory. They are used to
+		provide functions that Prolac TCP needs to use or does not
+		need to implement (`sendmsg', for example).
+
+This code uses implicit methods extensively. See the reference manual for a
+detailed definition; but most simply, an implicit method is a method call
+where the object is left off. (So I can call a method `seg->left' just by
+saying `left'.) This, and the highly interconnected nature of the code, can
+make it hard to read at first. Hopefully it will quickly get easier with
+familiarity.
+
+One useful navigation tool is Emacs's TAGS mechanism. Type `make TAGS' to
+create a TAGS table for both the C and Prolac files in this directory. If
+you are using the Prolac Emacs mode that came in this package
+(`prolac-mode.el' in the `emacs' subdirectory), everything should work: if
+you go near an identifier (even one with hyphens) and type `M-.', you will
+jump to where that identifier was defined.

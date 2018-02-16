@@ -1,0 +1,122 @@
+#ifndef REASS_PC
+#define REASS_PC
+
+module Base.Reassembly :> InputBase
+has .Segment, .TCB, TopReassembly
+{
+  
+  field _queue :> *Segment;
+  
+  // Returns true iff a FIN was received as a result of this segment.
+  // Either the segment was in order and had a FIN, or this segment
+  // patched the hole in an out-of-order sequence ending with a FIN.
+  static run(seg :> *Segment, tcb :> *TCB) :> bool ::=
+    inline TopReassembly(seg, tcb).do-run;
+  
+  do-run :> bool ::=
+    can-easy-reassemble ==> easy-reassemble
+    ||| difficult-reassemble;
+
+  can-easy-reassemble :> bool ::=
+    !seqlen
+    || (!reassembly-queue
+	&& expected-seqno(seg->seqno)
+	&& established);
+  
+  easy-reassemble :> bool ::= 
+    (!seqlen ==> tcb->receive-hook(seg), seg->free, false)
+    ||| easy-reassemble-data;
+
+  easy-reassemble-data :> bool ::=
+    mark-pending-ack, // XXX best place?
+    segment-to-user(seg),
+    seg->fin;
+  
+  
+  difficult-reassemble :> bool ::=
+    mark-pending-ack, // XXX best place?
+    _queue = reassembly-queue-tail,
+    (_queue ==> insert-into-nonempty-queue
+     ||| append-to-reassembly-queue(seg)),
+    inline[0] print-reassembly-queue,
+    (seg ==> difficult-send-to-user
+     ||| false);
+  
+  insert-into-nonempty-queue ::=
+    move-queue-to-overlap(seg->seqno),
+    (_queue && front-overlaps ==> remove-front-overlaps),
+    seg ==> (_queue ==> remove-back-overlaps(seg->right)),
+            (_queue ==> seg->insert-before(_queue)
+	     ||| append-to-reassembly-queue(seg));
+  
+  move-queue-to-overlap(seqno :> seqint) ::=
+    (_queue->right > seqno ==> 0)
+    ||| (_queue = _queue->prev-segment,
+	 _queue ==> move-queue-to-overlap(seqno));
+  
+  
+  front-overlaps :> bool ::=
+    _queue->left <= seg->seqno;
+  
+  remove-front-overlaps ::=
+    assertion(front-overlaps),
+    let edge = _queue->right in
+      trim-against(edge, seg) ==> duplicate-packet
+      ||| move-forward-and-try-front-overlaps-again
+    end;
+  
+  // This logic is different than BSD (v2p914), which adjusts the
+  // segments already in the queue rather than the incoming segment.
+  move-forward-and-try-front-overlaps-again ::=
+    _queue = _queue->next-segment,
+    _queue && front-overlaps ==> remove-front-overlaps;
+  
+  
+  remove-back-overlaps(edge :> seqint) ::=
+    trim-against(edge, _queue) ==>
+      let next = _queue->next-segment in
+        _queue->unlink, 
+	_queue->free,
+        _queue = next,
+        (_queue ==> remove-back-overlaps(edge))
+      end;
+  
+  
+  // Returns true iff the segment was a complete duplicate.
+  trim-against(edge :> seqint, seg :> *Segment) :> bool ::=
+    edge <= seg->left ==> false
+    ||| edge >= seg->right ==> true
+    ||| seg->trim-front(edge - seg->left), // XXX trim-front does urg
+	false;
+  
+  duplicate-packet ::=
+    tcb->print, seg->print, seg->free;
+  
+  
+  segment-to-user(seg :> *Segment) ::=
+    socket->receive-next-segment(seg);
+  
+  
+  difficult-send-to-user :> bool ::=
+    _queue = reassembly-queue,
+    !connection-exists || !_queue ==> false
+    ||| !expected-seqno(_queue->seqno) ==> false
+    ||| syn-received ==> false // XXX "& length nonzero"
+    ||| reassemble-to-user;
+  
+  reassemble-to-user :> bool ::=
+    { PDEBUG("Reassemble to user.\n"); }
+    let was-fin = _queue->fin, next = _queue->next-segment in
+      _queue->unlink,
+      segment-to-user(_queue),
+      print-reassembly-queue,
+      // XXX delete queue
+      _queue = next,
+      _queue && expected-seqno(_queue->seqno) ==> reassemble-to-user
+      ||| was-fin
+    end;
+  
+} inline[0] (difficult-reassemble);
+
+#define CUR_REASSEMBLY	Base.Reassembly
+#endif

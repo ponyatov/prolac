@@ -1,0 +1,164 @@
+#ifndef WINDOW_PC
+#define WINDOW_PC
+
+module WindowM.TCB :> P-TCB show (constructor)
+has .Segment, Socket, Headers.TCP {
+  
+  field _snd_wnd :> uint @ 220;	// Send window (from remote)
+  field _snd_wnd_seqno :> seqint @ 212; // Segment seq number used for last wnd
+  field _snd_wnd_ackno :> seqint @ 216; // Segment ack used for last wnd
+  field _snd_wnd_max :> uint @ 224;
+  field _rcv_wnd :> uint @ 352;	// Receive window
+  field _rcv_wnd_seqno :> uint @ 356;	// Right of largest receive window advertised
+  
+  static F.need-window-update :> ushort ::= P-TCB.max-flag * 2;
+  static max-flag :> ushort ::= F.need-window-update * 2;
+  
+  
+  constructor(s :> *Socket) ::=
+    P-TCB(s),
+    // XXX set _snd_wnd_seqno!
+    _snd_wnd_max = 0,
+    _rcv_wnd = 32768;
+  
+  
+  // WINDOW SIZES
+  
+  max-window-size :> int ::= TCP.max-window-size;
+  
+  receive-window-left :> seqint ::=
+    _rcv_wnd_seqno;
+  receive-window-right :> seqint ::=
+    _rcv_wnd_seqno + _rcv_wnd;
+  receive-window-empty :> bool ::=
+    _rcv_wnd == 0;
+  
+  in-receive-window(s :> seqint) ::=
+    s >= receive-window-left && s < receive-window-right;
+  
+
+  // SETTING RECEIVE WINDOW
+  
+  set-receive-window-conservatively ::=
+    set-receive-window.conservatively;
+  set-receive-window-liberally ::=
+    set-receive-window.liberally;
+  need-window-update :> bool ::=
+    test-flag(F.need-window-update);
+  
+  set-receive-window {
+    
+    POO(i :> int) ::= let rl = receive-window-left - _irs, rr = receive-window-right - _irs in { PDEBUG("set-receive-window %d: %d-%d\n", i, rl, rr); } end;
+    conservatively ::=
+      let w = base in
+        w = avoid-silly-window-syndrome(w),
+        w max= max-window-size,
+        w = avoid-shrinking-window(w),
+        check-need-window-update(w),
+        _rcv_wnd = w
+      end;
+    
+    liberally ::=
+      _rcv_wnd = avoid-shrinking-window(base);
+    
+    
+    base :> uint ::=
+      socket->receive-buffer;
+    
+    avoid-silly-window-syndrome(w :> uint) :> uint ::=
+      silly-window(w) ? 0 : w;
+    
+    silly-window(w :> uint) :> bool ::=
+      w < socket->max-receive-buffer / 4 && w < mss;
+    
+    avoid-shrinking-window(w :> uint) :> uint ::=
+      let right = receive-window-right in
+        _rcv_nxt + w < right ==> right - _rcv_nxt
+        ||| w
+      end;
+    
+    check-need-window-update(w :> uint) ::=
+      let window-enlargement = (_rcv_nxt + w) - receive-window-right in
+        (window-enlargement >= 2 * mss
+	 || 2 * window-enlargement >= socket->max-receive-buffer
+	 ==> set-flag(F.need-window-update))
+      end;
+    
+  }
+  
+  
+  // SEND WINDOW
+  
+  send-window-advertised :> uint ::=
+    _snd_wnd;
+  send-window :> uint ::=
+    _snd_wnd;
+  
+  // send-window-avail can be < 0 if we have to retransmit.
+  send-window-avail :> int ::=
+    send-window - (_snd_nxt - _snd_una);
+  
+  if-segment-forces-new-send-window(seg :> *Segment) :> bool ::=
+    (_snd_wnd_seqno < seg->seqno)
+    || (_snd_wnd_seqno == seg->seqno && _snd_wnd_ackno < seg->ackno)
+    || (_snd_wnd_ackno == seg->ackno && _snd_wnd < seg->window);
+  
+  set-send-window(seg :> *Segment) ::=
+    _snd_wnd = seg->window,
+    _snd_wnd_seqno = seg->seqno,
+    _snd_wnd_ackno = seg->ackno,
+    _snd_wnd_max max= _snd_wnd;
+  
+  // returns true iff send window changed 
+  update-send-window(seg :> *Segment) :> bool ::=
+    if-segment-forces-new-send-window(seg) ==> set-send-window(seg);
+  
+  
+  // MARKS
+  // MARKS: RECEIVING, RECEIVED ACKNOWLEDGEMENTS
+  
+  receive-syn-hook(seqno :> seqint) ::=
+    inline super.receive-syn-hook(seqno),
+    _rcv_wnd_seqno = seqno + 1;
+  
+  new-ack-hook(ackno :> seqint) ::=
+    _snd_wnd -= ackno - _snd_una, // XXX ????
+    inline super.new-ack-hook(ackno);
+  
+  
+  // MARKS: SENDING
+  
+  send-segment(seg :> *Segment) ::=
+    seg->_tcp_header->window = _rcv_wnd,
+    (receive-window-left > _rcv_wnd_seqno ==> _rcv_wnd_seqno = receive-window-right),
+    inline super.send-segment(seg);
+  
+  send-hook(seqlen :> uint) ::=
+    let w = send-window in {
+      PDEBUG("window.send-hook: snd_nxt %d snd_wnd %d TCB %p\n", 
+	     _snd_nxt, w, &self); 
+    } end,
+    inline super.send-hook(seqlen),
+    clear-flag(F.need-window-update),
+    _snd_wnd -= seqlen;
+  
+  
+  // PRINTING
+  
+  print ::= super.print, { 
+    PDEBUG("    snd_wnd %u  _rcv_wnd %u\n", _snd_wnd, _rcv_wnd);
+  };
+  
+} inline (max-window-size, receive-window-left, receive-window-right,
+	  receive-window-empty, in-receive-window, send-window,
+	  if-segment-forces-new-send-window, set-send-window,
+	  receive-syn-hook,
+	  send-window-avail, set-receive-window.all)
+  inline[0] (print)
+  hide (_snd_wnd, _snd_wnd_seqno, _snd_wnd_ackno, _rcv_wnd,
+	set-receive-window, if-segment-forces-new-send-window);
+
+module WindowM.P-TCB ::= CUR_TCB;
+#undef CUR_TCB
+#define CUR_TCB		WindowM.TCB
+#endif

@@ -1,0 +1,13 @@
+multiple inheritance
+multiple inheritance w/ virtual bases
+(x = 2) + (x = 3)
+do slicing prevention
+layout rule?
+module X { y ::= } hide y; module Y :> X { }; module Z :> Y **show y** { };
+inline all : is it ALL all or module all??
+check "making small static constant rules"
+tail recursion even with ||
+
+....
+????
+....

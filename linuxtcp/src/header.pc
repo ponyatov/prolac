@@ -1,0 +1,120 @@
+#ifndef HEADER_PC
+#define HEADER_PC
+#include "util.pc"
+#define EP_IP           0x0800
+#define IP_PROTO_TCP	0x6
+
+module Headers.IP 
+has Util
+{
+  
+  field v_hl :> uchar;
+  field tos :> uchar;
+  field len :> ushort;
+  field id :> ushort;
+  field frag-off :> ushort;
+  field ttl :> uchar;
+  field p :> uchar;
+  field cksum :> ushort;
+  field saddr :> uint;
+  field daddr :> uint;
+  
+  // version and header length are embedded in a single char  
+  v :> uchar ::= (v_hl >> 4) & 0xF;
+  hl :> uchar ::= (v_hl & 0xF) * 4;
+  
+  fragmented ::= frag-off & 0x1FFF;
+  
+  static header-size :> int ::= 20;
+  static pseudo-size :> int ::= 12;
+  
+  // HOST TO NET TO HOST
+  net-to-host :> bool ::=
+    	len = ntohs(len), frag-off = ntohs(frag-off), id = ntohs(id), true;
+  host-to-net :> bool ::=
+    	len = htons(len), frag-off = htons(frag-off), id = htons(id), true;
+  
+} hide (frag-off);
+
+
+module TCPFlags {
+  
+  field fv :> uchar;
+  
+  V {
+    static fin :> int ::= 1;
+    static syn :> int ::= 2;
+    static rst :> int ::= 4;
+    static psh :> int ::= 8;
+    static ack :> int ::= 16;
+    static urg :> int ::= 32;
+  }
+  
+  fin :> bool ::= fv & V.fin;
+  syn :> bool ::= fv & V.syn;
+  rst :> bool ::= fv & V.rst;
+  psh :> bool ::= fv & V.psh;
+  ack :> bool ::= fv & V.ack;
+  urg :> bool ::= fv & V.urg;
+  
+  set-fin ::= fv |= V.fin;   clear-fin ::= fv &= ~V.fin;
+  set-syn ::= fv |= V.syn;   clear-syn ::= fv &= ~V.syn;
+  set-rst ::= fv |= V.rst;   clear-rst ::= fv &= ~V.rst;
+  set-psh ::= fv |= V.psh;   clear-psh ::= fv &= ~V.psh;
+  set-ack ::= fv |= V.ack;   clear-ack ::= fv &= ~V.ack;
+  set-urg ::= fv |= V.urg;   clear-urg ::= fv &= ~V.urg;
+  
+  any-flags :> bool ::= fv != 0;
+  expected-packet-flags :> bool ::=
+    (fv & (V.fin | V.syn | V.rst | V.ack | V.urg)) == V.ack;
+  
+} hide (fv, V) inline all;
+
+
+module Headers.TCP
+has TCPFlags, IP, Util {
+  
+  field sport :> ushort;
+  field dport :> ushort;
+  field seqno :> seqint;
+  field ackno :> seqint;
+  field offset :> uchar;
+  field fv :> TCPFlags using all;
+  field window :> ushort;
+  field cksum :> ushort;
+  field urp :> ushort;
+  
+  static min-header-size :> int ::= 20;
+  static max-window-size :> int ::= 65535;
+  
+  header-size :> int ::= (offset >> 2) & ~0x3;
+  set-offset(i :> uchar) ::=
+    { assert( ((i & 0xC3) == 0) ); }
+    offset = i << 2;
+  
+  // HOST TO NET TO HOST
+  net-to-host :> bool ::=
+    seqno = ntohl(seqno), ackno = ntohl(ackno), window = ntohs(window),
+    sport = ntohs(sport), dport = ntohs(dport), true;
+  host-to-net :> bool ::=
+    seqno = htonl(seqno), ackno = htonl(ackno), window = htons(window),
+    sport = htons(sport), dport = htons(dport), true;
+  
+  // PRINTING
+  print ::= true;
+  
+  // get implicit rules
+  force-implicit-rules ::=
+    fin, syn, rst, psh, ack, urg,
+    set-fin, set-syn, set-rst, set-psh, set-ack, set-urg,
+    clear-fin, clear-syn, clear-rst, clear-psh, clear-ack, clear-urg,
+    any-flags, expected-packet-flags;
+  
+} show (fin, syn, rst, psh, ack, urg,
+    set-fin, set-syn, set-rst, set-psh, set-ack, set-urg,
+    clear-fin, clear-syn, clear-rst, clear-psh, clear-ack, clear-urg,
+    any-flags, expected-packet-flags)
+  inline all
+  hide (fv);
+
+#endif

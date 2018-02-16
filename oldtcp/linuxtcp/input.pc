@@ -1,0 +1,370 @@
+#ifndef INPUT_PC
+#define INPUT_PC
+#undef BSD
+
+module Top-Input ::= .Input;
+
+module Base.Input
+has .Segment, .TCB, .Listen inline do, .Syn-Sent inline do, .Ack inline do,
+.Reassembly, .Fin inline do, .Reset inline do, .Trim-To-Window inline do,
+.Output, .Top-Input {
+  
+  field tcb :> *TCB using all;
+  field seg :> *Segment using all;
+  
+  constructor(s :> *Segment, b :> *TCB) ::= tcb = b, seg = s;
+  
+  set-input-tcb(t :> *TCB) ::= tcb = t;
+  
+  exception drop;
+  exception ack-drop;
+  exception reset-drop;
+  exception abort-connection;
+
+  static run(s :> *Segment, b :> *TCB) ::=
+    Top-Input(s, b).do-help catch all;
+
+  do-help ::=
+    do-input
+    catch ack-drop ==> mark-pending-ack, Output(tcb).do, drop
+    catch reset-drop ==> send-reset, drop
+    catch abort-connection ==> close-connection, drop
+    catch drop ==> /*{printk("Dropping packet. Freeing...\n");},*/ seg->free-read;
+
+  do-input ::=
+    (!net-to-host ==> {PDEBUG("bad segment!!\n"); } drop),
+    process-tcp-options,
+    do-segment;
+
+  process-tcp-options ::=
+    true;
+    
+  do-segment ::= 
+    // STAT tcb->rcv_nnormal++,
+#ifdef PRINT
+    seg->print, tcb->print,
+#endif
+    (closed ==> reset-drop)
+    || (listen ==> Listen(seg, tcb).do)
+    || (syn-sent ==> Syn-Sent(seg, tcb).do)
+    || other-states;
+  
+  other-states ::= 
+    /* XXX PAWS */
+    Trim-To-Window(seg, tcb).do,
+    (!tcb->socket->has-filedesc && seg->len && closing-or-after 
+     ==> reset-drop), 
+     /* XXX record timestamp v2p963 */
+    (rst ==> Reset(seg, tcb).do),
+    (syn ==> reset-drop),
+    (!ack ==> drop),
+    Ack(seg, tcb).do,
+    process-data;
+  
+  process-data ::= 
+    (urg ==> check-urg),
+    let is-fin = Reassembly(seg, tcb).do in
+      (is-fin ==> Fin(seg, tcb).do)
+    end,
+    send-data-or-ack;
+
+  
+  check-urg ::= true;
+  
+  // XXX double-check appropriateness of using seg->ackno rather than
+  // something like snd_next
+  send-reset ::=
+    {PDEBUG("In input->send-reset.\n"); }
+    rst				// Don't need to reset a reset.
+    || (ack ==>  Output(tcb).send-reset(seg->ackno))
+    || (!ack ==> Output(tcb).send-ack-reset(0, seg->seqno + seg->len));
+  
+  send-data-or-ack ::= 
+    //{PDEBUG("input.pc:send-data-or-ack\n"); }
+    output-pending ==> Output(tcb).do;
+  
+  assertion(b :> bool) ::= { assert(b); };
+  
+} inline (constructor, assertion);
+
+
+module Base.Listen :> .Input has .Trim-To-Window {
+  
+  do ::=
+   (rst ==> drop)
+   || (ack ==> reset-drop)
+   || (!syn ==> drop)
+   || handshake-2;
+  
+  handshake-2 ::=
+    /* SOCK much stuff including mcast; v2p943, 945 */
+    let new-sock = socket->new-passive-open(seg->seqno, seg->sport) in 
+      //Sender(new-sock->tcb).ack.syn.send,
+      /* XXX iss processing v2p945 */
+      new-sock->tcb->enter-syn-received,
+      new-sock->tcb->mark-pending-output,
+      set-input-tcb(new-sock->tcb),
+      process-tcp-options,
+      continue-processing
+    end;
+  
+  continue-processing ::=
+    // trim SYN so that we don't inappropriately stick segment on reassembly
+    // queue
+    trim-syn,
+    Trim-To-Window(seg, tcb).do, /* XXX BSD does different trim v2p951 */
+    set-send-window(seg), mark-pending-output, // XXX better place?
+    /* XXX urg v2p951 */
+    process-data;
+  
+};
+
+
+module Base.Syn-Sent :> .Input has .Listen, .Segment { // BSD
+  
+  do ::=
+    (ack && !unseen-ack(seg->ackno) ==> reset-drop)
+    || (rst ==> (ack ==> socket->drop), drop)
+    || (!syn ==> {PDEBUG("dropping packet with ack but no syn.\n"); } drop)
+    || handshake-1;
+  
+  handshake-1 ::=
+    tcb->receive-syn-hook(seg->seqno), /* XXX tcp_rcvseqinit */
+    cancel-retransmit,
+    mark-pending-ack,
+    (ack ==> handshake-complete) // ack was unseen, therefore SYN acked
+    || enter-syn-received,
+    Listen(seg,tcb).continue-processing;
+  
+  handshake-complete ::=
+    /* SOCK v2p949 */
+    new-ack-hook(seg->ackno),
+    /* SOCK reassemble -> socket v2p949 */
+    enter-established;
+  
+};
+
+
+module Base.Trim-To-Window :> .Input { // BSD
+  
+  do :> void ::= let irs=tcb->irs in
+    let rl = receive-window-left - irs, rr = receive-window-right - irs,
+       sl = seg->left - irs, sr = seg->right - irs, sa = seg->ackno in
+      { PDEBUG("Receive-window-left %d-%d S=%d-%d %d\n", rl, rr, sl, sr, sa); },
+    end end,
+    (before-window ==> trim-old-data),
+    /* XXX BSD handles data receiving if process has terminated v2p957 */
+    (after-window ==> trim-early-data);
+  
+  
+  before-window :> bool ::= seg->left < receive-window-left;
+  
+  trim-old-data {
+    
+    trim-old-data ::=
+      (syn ==> trim-syn),
+      (whole-packet-old ==> duplicate-packet)
+      || trim-front(receive-window-left - seg->left);
+    
+    whole-packet-old :> bool ::=
+      seg->right <= receive-window-left;
+    
+    duplicate-packet ::=
+      /* XXX reset? mark-pending-ack? */
+      clear-fin,
+      mark-pending-ack,
+      ack-drop;
+    
+  }
+  
+  
+  after-window :> bool ::= seg->right > receive-window-right;
+  
+  trim-early-data {
+    
+    trim-early-data ::=
+      (whole-packet-early ==> early-packet)
+      || seg->trim-back(seg->right - receive-window-right);
+    
+    whole-packet-early :> bool ::=
+      seg->left >= receive-window-right;
+    
+    early-packet ::=
+      /* XXX TIME_WAIT processing etc v2p958 */
+      (receive-window-empty && seg->seqno == receive-window-left ==>
+       mark-pending-ack /* STAT rcvwinprobe */)
+      /*, drop; .. XXX ack-drop-fail if receive window not empty (immediate ack, as opposed to pending ack)? */
+      || { PDEBUG("early packet.\n"); }, ack-drop;
+    
+  }
+  
+} inline all
+  inline[3] do;
+
+
+#if 0
+/*original Trim-To-Window */
+module Base.Trim-To-Window :> .Input { // BSD
+  
+  field trim :> int;
+  
+  do ::=
+    calculate-receive-window,
+    (before-window ==> duplicate-data),
+    /* XXX BSD handles data receiving if process has terminated v2p957 */
+    (after-window ==> early-data);
+  
+  
+  calculate-receive-window ::= true;
+  
+  
+  before-window ::= seqno < receive-window-left;
+  
+  duplicate-data {
+    
+    duplicate-data ::=
+      trim = receive-window-left - seqno,
+      trim-syn,
+      trim-data;
+    
+    trim-syn ::= syn ==> (seg->trim-syn, trim--);
+    
+    // Revised trim function from v2p960; not actually BSD
+    trim-data ::=
+      (whole-packet-sucks ==> whole-packet-will-be-dropped
+       ||| /* STAT rcvpartduppack */ true),
+      seg->trim-front(trim);
+    
+    whole-packet-sucks ::=
+      // Have to check FIN as well!
+      trim > seg->len || (trim == seg->len && !fin);
+    
+    whole-packet-will-be-dropped ::=
+      clear-fin, mark-pending-ack, trim = seg->len /* STAT rcvduppack */;
+    
+  }
+  
+  
+  // XXX > or >= ?
+  after-window ::= seg->right > receive-window-right;
+  
+  early-data {
+    
+    early-data ::=
+      trim = seg->right - receive-window-right,
+      //(trim > len ==> trim = len),
+      /* STAT rcvpackafterwin, rcvbyteafterwin */
+      (whole-packet-sucks ==> whole-packet-will-be-dropped),
+      seg->trim-back(trim);
+    
+    whole-packet-sucks ::= trim >= seg->len;
+    
+    whole-packet-will-be-dropped ::=
+      /* XXX TIME_WAIT processing etc v2p958 */
+      (receive-window-empty && seg->seqno == receive-window-left ==>
+       mark-pending-ack /* STAT rcvwinprobe */)
+      || ack-drop;
+    
+  }
+  
+};
+#endif
+
+
+module Base.Reset :> .Input {
+  
+  do ::= assertion(rst),
+    ((syn-received ==> do-syn-received)
+     || (closing || last-ack || time-wait ==> close-connection)
+     || abort-connection);
+  
+  do-syn-received ::= (passive-open ==> silently-move-to-listen)
+      || abort-connection;
+  
+  passive-open :> bool ::= { assert(0); };
+  
+  silently-move-to-listen ::=
+    do-some-stuff, enter-listen;
+  
+  do-some-stuff ::= { assert(0); };
+  
+};
+
+
+
+module Base.Ack :> .Input {
+  
+  do ::= assertion(ack),
+    do-ack,
+    (update-send-window(seg) ==> mark-pending-output);
+
+  do-ack ::=
+    (syn-received ==> do-syn-received),
+    established-or-after ==>
+       do-main ==>
+	  do-special;
+  
+  do-syn-received ::=
+      (unseen-ack(seg->ackno) ==> enter-established, set-send-window(seg))
+      || reset-drop;
+  
+  do-main :> bool ::=
+    old-ack(seg->ackno) ==> duplicate, false
+    ||| unseen-ack(seg->ackno) ==> normal, true
+    ||| /* too-new ack */ {PDEBUG("ack is dropping packets.\n"); }ack-drop, false;
+  
+  duplicate ::= true;
+  
+  normal ::=
+    new-ack-hook(seg->ackno),
+    (totally-acked ==> mark-pending-output); // XXX Persist.
+  
+  do-special ::=
+    (fin-wait-1 ==> do-fin-wait-1)
+    || (closing ==> do-closing)
+    || (last-ack ==> do-last-ack)
+    || (time-wait ==> do-time-wait);
+  
+  do-fin-wait-1 ::= have-sent-fin && totally-acked ==> /* SOCK v2p979 */ enter-fin-wait-2;
+  do-closing ::= totally-acked ==> /* SOCK v2p980 */ enter-time-wait;
+  do-last-ack ::= 
+    totally-acked ==> /* XXX */ close-connection, {PDEBUG("do-last-ack is dropping.\n"); }, drop;
+  do-time-wait ::= enter-time-wait, {PDEBUG("do-time-wait is dropping.\n"); }, drop;
+  
+} inline (do-syn-received, do-main,
+          do-special, do-fin-wait-1, do-closing, do-last-ack, do-time-wait);
+
+
+module Base.Fin :> .Input { 
+  
+  do ::=
+      mark-fin-received,
+      (syn-received || established ==> enter-close-wait)
+      || (fin-wait-1 ==> do-fin-wait-1)
+      || (fin-wait-2 ==> do-fin-wait-2)
+      || (time-wait ==> do-time-wait);
+  
+  do-fin-wait-1 ::=
+      (totally-acked ==> enter-time-wait)
+      || enter-closing;
+  
+  do-fin-wait-2 ::= enter-time-wait;
+  do-time-wait ::= mark-pending-ack, start-timewait-timer;
+  
+  mark-fin-received ::=
+    (established || fin-wait-1 || fin-wait-2 ==> receive-hook(1)),
+    // XXX mark-deliver also?
+    mark-pending-ack;
+  
+};
+
+
+// hookup
+#define CUR_INPUT	Base.Input
+#define CUR_LISTEN	Base.Listen
+#define CUR_SYN_SENT	Base.Syn-Sent
+#define CUR_TRIM	Base.Trim-To-Window
+#define CUR_ACK		Base.Ack
+#define CUR_FIN		Base.Fin
+#define CUR_RESET	Base.Reset
+#endif

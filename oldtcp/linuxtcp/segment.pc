@@ -1,0 +1,334 @@
+#ifndef SEGMENT_PC
+#define SEGMENT_PC
+#define IP_PROTO_TCP		0x6
+
+module Base.Segment :> .Segment-Link
+has Headers.Ether, Headers.IP, Headers.TCP, Headers.Pseudo, Byte-Order, Checksum {
+  
+  // Link pointers (inherited from Segment-Link)
+  //field _next :> *Segment;
+  //field _prev :> *Segment;
+  
+  // Header pointers
+  field _tcp_header :> *TCP using all @ 36;
+  field _ip_header :> *IP using all @ 44;
+
+  // Data pointers
+  field _head :> *char @ 124;		/* Head of buffer 				*/
+  field _data :> *char @ 128;		/* Data head pointer				*/
+  field _tail :> *char @ 132;		/* Tail pointer					*/
+  field _end :> *char @ 136;		/* End pointer					*/
+
+
+  assertion(b :> bool) ::= true;
+  
+
+  // FIELDS
+  
+  seqno :> seqint ::= _tcp_header->seqno;
+  ackno :> seqint ::= _tcp_header->ackno;
+  sport :> ushort ::= _tcp_header->sport;
+  window :> seqint ::= _tcp_header->window;
+  urp :> ushort ::= _tcp_header->urp;
+
+
+  empty ::= len == 0;
+
+  text-pointer :> *char ::= (*char)((*void)_tcp_header) + _tcp_header->header-length;
+  option-pointer :> *uchar ::= (*uchar)((*void)_tcp_header) + TCP.header-size;
+
+  len :> uint ::= _tail - text-pointer;
+  header-length :> uint ::= _ip_header->hl + _tcp_header->header-length;
+  data-length :> uint ::= _tail - _data;
+  max-length :> uint ::= _end - _head;
+  free-space :> uint ::= _end - _tail;
+
+  // Sequence numbers consumed by this packet, including SYN and FIN. 
+  seqlen :> uint ::= len + (syn ? 1 : 0) + (fin ? 1 : 0);
+  
+  left :> seqint ::= _tcp_header->seqno;
+  right :> seqint ::= _tcp_header->seqno + seqlen;
+  
+  set-seqno(a :> seqint) ::= _tcp_header->seqno = a;
+  set-ack(a :> seqint) ::= _tcp_header->set-ack, _tcp_header->ackno = a;
+  
+  device-mtu :> ushort ::= 
+      let mtu :> ushort in
+      {
+	struct sk_buff *skb = (struct sk_buff *)&self;
+	if (!skb->dev) {
+	  PDEBUG("Tried to get MTU without device.\n");
+	  mtu = 536;
+	} else {
+	  mtu = skb->dev->mtu; 
+	}
+      } mtu, end;
+
+    
+  // TRIMMING
+  
+  trim-syn ::= assertion(syn), trim-front-seqno(1), clear-syn;
+  
+  trim-front(a :> int) ::=
+    (_tcp_header ==> trim-front-seqno(a)), /* XXX linux doesn't need to check this */
+    _data += a;
+
+  data-trim-front(a :> int) ::=
+    _data += a;
+
+  trim-front-seqno(a :> int) ::=
+    assertion(a < seqlen),
+    _tcp_header->seqno += a,
+    (urg ==> urp > a ? _tcp_header->urp -= a : clear-urg);
+  
+  trim-back(a :> int) ::= /* MBUF m_adj */
+    assertion(a <= len),
+    _tail -= a,
+    clear-psh, clear-fin;
+  
+  
+  // REASSEMBLY
+  
+  find-overlapping(seqno :> seqint, sentinel :> *Segment-Link) :> *Segment ::=
+    (right > seqno ==> &self)
+    ||| (!next-segment(sentinel) ==> 0)
+    ||| next-segment(sentinel)->find-overlapping(seqno, sentinel);
+
+
+
+  // NET TO HOST
+  // Returns false on a poorly-formed packet.
+  
+  net-to-host {
+
+    /* 
+     * We get a segment with:
+     * 1. _data pointing to the start of the IP header
+     * 2. _ip_header pointing to IP header.
+     * 3. _tcp_header pointing to TCP header.
+     */
+    
+    net-to-host :> bool ::= 
+      pull-up-header
+      && _ip_header->net-to-host
+      && tcp-well-formed
+      && _tcp_header->net-to-host;
+
+    pull-up-header :> bool ::=
+      _data += _ip_header->hl + _tcp_header->header-length,
+      true;
+
+
+    tcp-well-formed :> bool ::=
+      let l = (int)(_tail - (*char)((*void)_tcp_header)), checksum :> ushort in {
+	struct sk_buff *skb = (struct sk_buff *)&self;
+        checksum = 0;
+        switch (skb->ip_summed) {
+	  case CHECKSUM_NONE:
+	    skb->csum = csum_partial((char *)_tcp_header, l, 0);
+	  case CHECKSUM_HW:
+	    checksum = tcp_check(_tcp_header, l, _ip_header->src, _ip_header->dst, skb->csum);
+	  default:
+	    // CHECKSUM_UNNECESSARY
+	}
+      }, (checksum == 0) ? true : ( {PDEBUG("bad tcp sum\n"); }, false)
+      end;
+      
+  }
+
+  
+  
+  // HOST TO NET
+  
+  host-to-net {
+    
+    host-to-net ::=
+      _tcp_header->host-to-net,
+      do-checksum;
+
+    do-checksum ::=
+      {
+	struct sk_buff *skb = (struct sk_buff *)&self;
+	unsigned char *datap = (unsigned char *)(skb->h.th+1);
+	int datalen = skb->tail - datap;
+	skb->csum = 0;
+	if (datalen) {
+	  skb->csum = csum_partial(datap, datalen, 0);
+	}
+	tcp_send_check((void *)_tcp_header, _ip_header->src, _ip_header->dst, 
+		       skb->tail - (unsigned char *)skb->h.th, skb);
+      } true;
+
+
+  }
+  
+  
+  // ALLOCATION/DEALLOCATION
+  
+  static new(datalen :> uint) :> *Segment  ::=
+    let s :> *Segment in
+      { 
+	//atomic_inc(&skb_count);
+	s = (void *)alloc_skb(datalen, intr_count ? GFP_ATOMIC : GFP_KERNEL); 
+	if (s) {
+	  s->_ip_header = 0;
+	  s->_tcp_header =0;
+	}
+      }, s
+    end;
+
+  free ::= { assert(0); } ;
+    
+  free-read ::= 
+  { 
+    struct sk_buff *skb = (struct sk_buff *)&self;
+    
+    //atomic_dec(&skb_count);
+    if (!skb) {
+      printk("ERROR! trying to free a null pointer!\n");
+      printk("Inside %s\n", __PRETTY_FUNCTION__);
+    } else {
+
+      if (skb->next != 0 || skb->prev != 0) {
+	printk("WARNING! freeing linked segment.\n");
+      }
+      ((struct sk_buff *)&self)->free = 1;
+      kfree_skb((struct sk_buff *)&self, FREE_READ); 
+    }
+  }, true;
+
+  free-write ::= {
+    struct sk_buff *skb = (struct sk_buff *)&self;
+    //atomic_dec(&skb_count);
+    //printk("free-write called on segment. (%d)\n", skb_count);
+
+    if (!skb) {
+      printk("ERROR! trying to free a null pointer!\n");
+      printk("Inside %s\n", __PRETTY_FUNCTION__);
+    } else {
+
+      if (skb->next != 0 || skb->prev != 0) {
+	printk("WARNING! freeing linked segment.\n");
+      }
+      ((struct sk_buff *)&self)->free = 1;
+      kfree_skb((struct sk_buff *)&self, FREE_WRITE); 
+    }
+  }, true;
+  
+  // ALLOCATING DATA
+
+  // Deprecated in favor of skbuff style allocation
+  allocate-data(datalen :> uint) ::= { 
+    assert(0); //real_data = data = (char *)malloc(datalen); 
+  };
+  
+  copy-into(off :> uint, here :> uint, into :> *Segment, into-off :> uint) ::= 
+  { 
+    if (here + into->_tail > into->_end) {
+      PDEBUG("ERROR! copy-into: here exceeds skbuff size.\n");
+      PDEBUG("Segment has room for max %d bytes\n",  into->_end - into->_head);
+      PDEBUG("Segment currently has room for %d more bytes\n", into->_end - into->_tail);
+      PDEBUG("segment has %d bytes already.\n", into->_tail - into->_data);
+      PDEBUG("trying to add %d more.\n", here);
+    }
+    else 
+      memcpy(skb_put((struct sk_buff *)into, here), _data + off, here); 
+  };
+  
+  
+  force-implicit-rules ::=
+    fin, syn, rst, psh, ack, urg,
+    set-fin, set-syn, set-rst, set-psh, set-urg,
+    clear-fin, clear-syn, clear-urg,
+    expected-packet-flags, print;
+  
+} show (fin, syn, rst, psh, ack, urg,
+	set-fin, set-syn, set-rst, set-psh, set-urg,
+	clear-fin, clear-syn, clear-urg,
+	expected-packet-flags, print)
+  inline (seqlen, set-ack, allocate-data,
+	  trim-syn, trim-front, trim-front-seqno, trim-back,
+	  data-trim-front, data_length,
+	  net-to-host.all, host-to-net.all)
+  inline[4] (net-to-host, host-to-net)
+  inline[0] print
+  hide (force-implicit-rules,
+	trim-front-seqno);
+
+
+module Segment-Link has .Segment {
+  
+  field _next :> *Segment-Link;
+  field _prev :> *Segment-Link;
+
+  cli ::= { /*save_flags(flags); cli();*/ };
+
+  sti ::= { /*restore_flags(flags);*/ };
+  
+  
+  // CREATION
+  
+  make-link-sentinel ::=
+    cli,
+    _next = _prev = &self,
+    sti;
+  
+  
+  // INSERTION, DELETION
+  
+  insert-link-before(l :> *Segment-Link) ::=
+    cli,
+    _next = l,
+    _prev = l->_prev,
+    l->_prev = &self,
+    _prev->_next = &self,
+    sti;
+  
+  delete-link ::=
+    cli,
+    _next->_prev = _prev,
+    _prev->_next = _next,
+    _next = 0, _prev = 0,
+    sti;
+  
+
+  // TRAVERSAL
+  
+  next-segment(sentinel :> *Segment-Link) :> *Segment ::=
+    _next == sentinel ? 0 : (*Segment)_next;
+  prev-segment(sentinel :> *Segment-Link) :> *Segment ::=
+    _prev == sentinel ? 0 : (*Segment)_prev;
+  
+  
+  // PRINTING
+  
+  free-link-chain {
+    free-link-chain(read :> bool) ::= help(next-segment(&self), read);
+    
+    help(seg :> *Segment, read :> bool) ::=
+      seg ==>
+      let n = seg->next-segment(&self) in
+        seg->delete-link,
+        { printk("Destroying link chain. Freeing...\n"); }
+	read ? seg->free-read : seg->free-write,
+	help(n, read),
+      end;
+  }
+
+  print-link-chain {
+    
+    print-link-chain ::= help(next-segment(&self));
+    
+    help(seg :> *Segment) ::=
+      let len :> uint in
+        (seg ==> len = seg->data-length,
+	         { PDEBUG(" %u+%u", seg->_tcp_header->seqno, len); },
+	         help(seg->next-segment(&self)))
+         ||| false
+      end;
+    
+  }
+  
+} hide (_next, _prev) notusing all inline all;
+
+#endif

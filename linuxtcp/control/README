@@ -1,0 +1,13 @@
+This directory contains a version of Linux 2.2.11 TCPv4 modified to run as
+an alternate TCP stack (see the kernel patch in `linuxtcp/kernelpatch').
+
+Type `make atcp.o' to create the module object file (atcp.o); install the
+module in your modified kernel with `insmod atcp.o'. From now on, all new
+TCP connections will be processed by the `atcp' stack. You can verify this
+by looking at the /proc/net/atcp and /proc/net/atcp_snmp files (analogues
+to /proc/net/tcp and /proc/net/snmp, but with atcp's statistics).
+
+Removing the module with `rmmod atcp' will transparently transfer any atcp
+connections to Linux's default TCP stack. However, if any process is
+listening on an atcp socket, you will not be able to remove the module (it
+is "in use"). Kill the listening programs and try again.

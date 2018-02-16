@@ -1,0 +1,266 @@
+#ifndef TCB_PC
+#define TCB_PC
+#define TCP_DEFAULT_MSS	536
+
+module Base.TCB
+has TCPState, TopTCB, .Output, .Segment, SegmentList, .Socket, Util
+{
+  
+  field _state :> /*volatile*/ TCPState using all @ 40;
+  
+  field _saddr :> seqint @ 100;
+  field _daddr :> seqint @ 16;
+  
+  field _local_port :> ushort @ 42;
+  field _remote_port :> ushort @ 24;
+  
+  field _snd_una :> seqint @ 192;
+  field _snd_nxt :> seqint @ 188;
+  field _snd_max :> seqint @ 360; // maximum sequence number sent + 1
+  field _iss :> seqint;		// initial send seqno
+  
+  field _rcv_nxt :> seqint @ 184;
+  field _irs :> seqint @ 456;	// initial receive seqno
+
+  field _flags :> ushort;
+  
+  
+  constructor(s :> *Socket) ::=
+  /* XXX _saddr = htonl(0x7f000001),
+     _daddr = htonl(0x7f000001), */
+    // _local_port = s->local_port,
+    // _remote_port = s->remote_port,
+    { _iss = secure_tcp_sequence_number(_saddr, _daddr, _local_port, _remote_port); },
+    _snd_nxt = _iss,
+    _snd_max = _iss,
+    _snd_una = _iss,
+    _flags = 0;
+  
+  
+  // LIST OF TCBS
+  
+  socket :> *Socket ::= 
+    (*Socket)((*void)&self);
+   
+  static _list-sentinel :> *TopTCB ::=
+    Socket._list-sentinel->tcb;
+  static _first-tcb :> *TopTCB ::=
+    _list-sentinel->_next-tcb;
+  _next-tcb :> *TopTCB ::=
+    socket->_next-socket->tcb;
+  _prev-tcb :> *TopTCB ::=
+    socket->_prev-socket->tcb;
+  
+  static first-tcb :> *TopTCB ::=
+    let s = Socket.first-socket in
+      s ? s->tcb : 0
+    end;
+  next-tcb :> *TopTCB ::=
+    let s = socket->next-socket in
+      s ? s->tcb : 0
+    end;
+  prev-tcb :> *TopTCB ::=
+    let s = socket->prev-socket in
+      s ? s->tcb : 0
+    end;
+  
+  // FLAGS
+  
+  static F.pending-ack :> ushort ::= 1;
+  static F.allow-no-delay :> ushort ::= 2;
+  static F.pending-output :> ushort ::= 4;
+  static max-flag :> ushort ::= F.pending-output;
+  
+  test-flag(f :> ushort) :> bool ::= _flags & f;
+  set-flag(f :> ushort) ::= _flags |= f;
+  clear-flag(f :> ushort) ::= _flags &= ~f;
+  
+  
+  // STATES
+  
+  connection-exists :> bool ::= have-received-syn;
+  
+  close-connection ::=
+    { tcb_unregister((TopTCB *)&self); }, _flags = 0, enter-closed;
+  
+  mark-close-after(len :> uint) ::=
+    (close-wait ==> enter-last-ack)
+    || (established || syn-received ==> enter-fin-wait-1)
+    || { assert(0); };
+  
+  
+  // OPTIONS
+  
+  allow-no-delay :> bool ::= test-flag(F.allow-no-delay);
+  
+  
+  // SEQUENCE NUMBERS
+  
+  send-idle :> bool ::=			_snd_una == _snd_max;
+  retransmitting :> bool ::=		_snd_nxt < _snd_max;
+  
+  
+  // RECEIVED ACKNOWLEDGEMENTS
+  
+  acked(seqno :> seqint) :> bool ::=	seqno < _snd_una;
+  totally-acked :> bool ::=		_snd_max <= _snd_una;
+  recently-acked :> bool ::=		_snd_nxt == _snd_una;
+  
+  valid-ack(ackno :> seqint) :> bool ::=
+    ackno >= _snd_una && ackno <= _snd_max;
+  unseen-ack(ackno :> seqint) :> bool ::=
+    ackno >  _snd_una && ackno <= _snd_max;
+  old-ack(ackno :> seqint) :> bool ::=
+    ackno <= _snd_una && ackno <= _snd_max;
+  
+  new-ack-hook(ackno :> seqint) ::=
+    socket->remove-old-data(ackno - max(_iss + 1, _snd_una)),
+    _snd_una = ackno,
+    (_snd_nxt < ackno ==> _snd_nxt = ackno), // XXX check always good
+    (totally-acked ==> total-ack-hook);
+  
+  total-ack-hook ::= true;
+  
+  
+  // RECEIVING
+  
+  expected-seqno(seqno :> seqint) :> bool ::= 
+    _rcv_nxt == seqno;
+  
+  receive-syn-hook(seqno :> seqint) ::=
+    _irs = seqno,
+    _rcv_nxt = seqno + 1;
+  
+  receive-hook(seg :> *Segment) ::=
+    _rcv_nxt += seg->seqlen;	// formerly datalen
+  
+  
+  // SENDING
+  
+  unsent-offset :> uint ::=
+    _snd_nxt - _snd_una;
+  mss :> ushort ::=
+    TCP_DEFAULT_MSS;
+  
+  start-retransmission ::=
+    _snd_nxt = _snd_una;
+  
+  mark-pending-ack ::=		set-flag(F.pending-ack);
+  ack-pending :> bool ::=	test-flag(F.pending-ack);
+  mark-pending-output ::=	set-flag(F.pending-output);
+  output-pending :> bool ::=	test-flag(F.pending-ack | F.pending-output);
+  
+  send-segment(s :> *Segment) ::=
+    // Initialize tcp fields.
+    print,
+    s->_tcp_header->seqno = _snd_nxt,
+    s->_tcp_header->sport = _local_port,
+    s->_tcp_header->dport = _remote_port,
+    s->host-to-net,
+    let state-name = _state.name in
+      { PDEBUG("Currently in %s\n", state_name); }
+    end,
+    send-hook(s->seqlen),
+    s->len ? send-nonempty-segment(s) : send-empty-segment(s);
+  
+  send-hook(seqlen :> uint) ::=
+    clear-flag(F.pending-ack | F.pending-output),
+    { PDEBUG("  seqlen on send %d\n", seqlen); }
+    _snd_nxt += seqlen,		// XXX persist
+    _snd_max max= _snd_nxt;
+  
+  send-empty-segment(s :> *Segment) ::= // STAT snd_ack
+    { tcp_send_segment(s); };
+  send-nonempty-segment(s :> *Segment) ::= // STAT
+    { tcp_send_segment(s); };
+  
+  
+  // PRINTING
+  
+  print ::= let state_name = _state.name in {
+    PDEBUG("   -- tcb(%d->%d): %s\n", local_port, remote_port,
+	   state_name);
+    PDEBUG("    _snd_una %u  _snd_nxt %u  _snd_max %u  _rcv_nxt %u\n",
+	   _snd_una, _snd_nxt, _snd_max, _rcv_nxt);
+  } end;
+  
+  state-name :> *char ::= _state.name;
+  
+  
+  force-implicit-rules ::=
+    listen, syn-sent, syn-received, established, fin-wait-1, fin-wait-2,
+    close-wait, closing, last-ack, time-wait, closed,
+    enter-listen, enter-syn-sent, enter-syn-received, enter-established,
+    enter-fin-wait-2, enter-close-wait, enter-closing, enter-time-wait,
+    have-received-syn, established-or-after, almost-dead, closing-or-after;
+  
+} inline[0] print
+  hide (_state, TCPState, _flags, constructor,
+	send-empty-segment, send-nonempty-segment)
+  show (listen, syn-sent, syn-received, established, fin-wait-1, fin-wait-2,
+	close-wait, closing, last-ack, time-wait, closed,
+	enter-listen, enter-syn-sent, enter-syn-received, enter-established,
+	enter-fin-wait-2, enter-close-wait, enter-closing, enter-time-wait,
+	have-received-syn, established-or-after, almost-dead, 
+	closing-or-after);
+
+
+module TCPState {
+  
+  V {
+    static closed :> int	::= 0;
+    static listen :> int	::= 1;
+    static syn-sent :> int	::= 2;
+    static syn-received :> int	::= 3;
+    static established :> int	::= 4;
+    static close-wait :> int	::= 5;
+    static fin-wait-1 :> int	::= 6;
+    static closing :> int	::= 7;
+    static last-ack :> int	::= 8;
+    static fin-wait-2 :> int	::= 9;
+    static time-wait :> int	::= 10;
+  }
+  
+  field v :> uchar;
+  
+  constructor ::= v = V.closed;
+  
+  listen :> bool	::= v == V.listen;
+  syn-sent :> bool	::= v == V.syn-sent;
+  syn-received :> bool	::= v == V.syn-received;
+  established :> bool	::= v == V.established;
+  fin-wait-1 :> bool	::= v == V.fin-wait-1;
+  fin-wait-2 :> bool	::= v == V.fin-wait-2;
+  close-wait :> bool	::= v == V.close-wait;
+  closing :> bool	::= v == V.closing;
+  last-ack :> bool	::= v == V.last-ack;
+  time-wait :> bool	::= v == V.time-wait;
+  closed :> bool	::= v == V.closed;
+  
+  // a separate function so we can potentially instrument it
+  set-state(s :> int)	::= v = s, {PDEBUG("enter %s\n", state_names[s]); };
+  
+  enter-listen		::= set-state(V.listen);
+  enter-syn-sent	::= set-state(V.syn-sent);
+  enter-syn-received	::= set-state(V.syn-received);
+  enter-established	::= set-state(V.established);
+  enter-fin-wait-1	::= set-state(V.fin-wait-1);
+  enter-fin-wait-2	::= set-state(V.fin-wait-2);
+  enter-close-wait	::= set-state(V.close-wait);
+  enter-closing		::= set-state(V.closing);
+  enter-last-ack	::= set-state(V.last-ack);
+  enter-time-wait	::= set-state(V.time-wait);
+  enter-closed		::= set-state(V.closed);
+  
+  have-received-syn :> bool	::= v >= V.syn-received;
+  established-or-after :> bool	::= v >= V.established;
+  almost-dead :> bool		::= v > V.established;
+  closing-or-after :> bool      ::= v >= V.closing;
+  
+  name :> *char		::= let c :> *char in { c = state_names[v]; }, c end;
+  
+} hide (v, V, set-state) inline all using all notusing name;
+
+
+#define CUR_TCB		Base.TCB
+#endif

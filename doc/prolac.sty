@@ -1,0 +1,284 @@
+\makeatletter
+
+\frenchspacing
+\parskip=0pt
+
+\ifx\prolacdefault\@undefined
+  \def\prolacdefault{Chaparral}%
+\fi
+\def\prolacfamily{\fontfamily{\prolacdefault}\selectfont}%
+
+\hyphenation{name-space}
+
+\newcommand{\unixcmd}[1]{\textit{#1}}
+\newcommand{\prolacc}{\unixcmd{prolacc}}
+\newcommand{\Prolacc}{\unixcmd{Prolacc}}
+\let\documentmarker\relax
+\def\begindocument{\begin{document}}
+\def\finishdocument{\end{document}}
+\DeclareRobustCommand*\textsubscript[1]{%
+  \@textsubscript{\selectfont#1}}
+\def\@textsubscript#1{%
+  {\m@th\ensuremath{_{\mbox{\fontsize\sf@size\z@#1}}}}}
+\let\sub\textsubscript
+\let\subscr_
+
+%% floats
+\renewcommand{\topfraction}{1.00}
+\renewcommand{\textfraction}{0.00}
+
+%% figure, table, footnote
+\newlength{\originalparindent}
+\setlength{\originalparindent}{\parindent}
+\renewcommand{\@makefnmark}%
+  {\raise.7ex\hbox{\kern.5pt\rmfamily\upshape\ed@fnmarksize\selectfont
+   \@thefnmark}}
+\renewcommand{\@makefntext}[1]%
+  {\parindent=\originalparindent\hangafter1\hangindent10pt\noindent\hbox to10pt{\@thefnmark.\hfil}#1}
+\renewcommand{\footnoterule}{}
+\setlength{\skip\footins}{10pt plus50pt}
+
+\let\oldldots\ldots
+\def\dotskip{\kern1pt}
+\def\ldots{\ifmmode\oldldots\else\unskip\dotskip.\dotskip.\dotskip.\dotskip\ignorespaces\fi}
+
+%%%%%
+% Prolac symbols
+%%
+
+\newif\if@prol@chaparral
+{\def\Chaparral{Chaparral}\edef\eprolacdefault{\prolacdefault}%
+\ifx\eprolacdefault\Chaparral\global\@prol@chaparraltrue\fi}
+\newif\if@prol@cmtt
+{\def\cmtt{cmtt}\edef\eprolacdefault{\prolacdefault}%
+\ifx\eprolacdefault\cmtt\global\@prol@cmtttrue\fi}
+
+\if@prol@cmtt
+\def\proland{\&}
+\def\prollbrace{\char`\{\relax}
+\def\prolrbrace{\char`\}\relax}
+\def\prolbackslash{\char`\\\relax}
+\def\prolhyphen{\char`\-\futurelet\next\afterprolhyphen}
+\def\afterprolhyphen{\ifx\next\prolgt\else\discretionary{}{}{}\fi}
+\def\prollt{\char"3C\relax}
+\def\prolgt{\char"3E\relax}
+\def\proltilde{\char`\~\relax}
+\def\prolcaret{\char`\^\relax}
+\def\prolmu{$\mu$\relax}
+\def\prolstar{*\relax}
+\def\prolat{\char`\@\relax}
+\def\prolor{\char`\|\relax}
+\else
+\def\proland{\&}
+\def\prollbrace{\char"E0\relax}
+\def\prolrbrace{\char"E1\relax}
+\def\prolbackslash{\char"E2\relax}
+\def\prolhyphen{\char"E3\futurelet\next\afterprolhyphen}
+\def\afterprolhyphen{\ifx\next\prolgt\else\discretionary{}{}{}\fi}
+\def\prollt{\char"E4\relax}
+\def\prolgt{\char"E5\relax}
+\def\proltilde{\char"E8\relax}
+\def\prolcaret{\char"E7\relax}
+\def\prolmu{\char"E9\relax}
+\def\prolstar{\ifvmode\leavevmode\fi\lower.2ex\hbox{*}\relax}
+\def\prolat{\char`\@\relax}
+\if@prol@chaparral
+  \def\prolor{\kern-.4pt\char"E6\kern-.4pt\relax}
+\else
+  \def\prolor{\kern1pt\char"E6\kern1pt\relax}
+\fi
+\fi
+
+{\catcode`\<\active\catcode`\>\active\catcode`\&\active\catcode`\|\active
+\catcode`\*\active\catcode`\-\active\catcode`\_\active\obeyspaces
+\gdef\prolmagicchars{%
+\catcode`\<\active\catcode`\>\active\catcode`\&\active\catcode`\|\active%
+\catcode`\-\active\catcode`\_\active\catcode`\*\active\makeatother%
+\let|\prolor\let&\proland\let<\prollt\let>\prolgt%
+\let\{\prollbrace\let\}\prolrbrace\let-\prolhyphen\let_\_%
+\let*\prolstar\let\~\proltilde\let\^\prolcaret\let\\\prolbackslash
+\let\b\pgb\let\v\pgv
+\obeyspaces\def {\leavevmode\ }}}%
+
+%%%%%
+% C++ symbols
+%%
+
+\def\cppcolon{:}
+\def\cppamp{\&}
+\def\cppor{\char"7C\relax}
+\def\cpplbrace{\char"7B\relax}
+\def\cpprbrace{\char"7D\relax}
+\def\cpptilde{\char"7E\relax}
+\def\cppfont{\ttfamily}
+%\def\cppcolon{\cppsymbol{:}\kern1pt\relax}
+%\def\cppamp{{\upshape\&}}
+%\def\cppor{{\upshape\kern1pt\char"E6\kern1pt}}
+%\def\cpplbrace{{\upshape\char"E0}}
+%\def\cpprbrace{{\upshape\char"E1}}
+%\def\cpptilde{\char"E8\relax}
+%\def\cppfont{\rmfamily\itshape}
+
+\def\cppsymbol#1{{\usefont{OT1}{Syntax}{b}{n}#1}}
+
+{\catcode`\:\active\catcode`\_\active\catcode`\&\active\catcode`\|\active
+\obeyspaces
+\gdef\cppmagicchars{%
+\catcode`\:\active\catcode`\_\active\catcode`\&\active\catcode`\|\active%
+\let:\cppcolon\let&\cppamp\let|\cppor\let\{\cpplbrace\let\}\cpprbrace%
+\let\~\cpptilde\def_{\char`\_}\obeyspaces\def {\leavevmode\ }}}%
+
+\newdimen\prolindent
+\prolindent=2\originalparindent%2.5em
+\newenvironment{cplusplus}
+{\list{}{%
+	\listparindent \z@%
+	\leftmargin    \prolindent
+	\itemindent    \z@
+	\rightmargin   0pt
+	\parsep        0pt}\raggedright%
+\rmfamily\itshape\cppmagicchars\obeylines\item\relax%
+}{\endlist}
+
+\def\aftercpp#1{\ifmmode\hbox\fi\bgroup\aftergroup#1%
+	\cppfont\cppmagicchars\let\next}
+\def\cpp{\aftercpp\relax}
+\def\qcpp{`\qprolkern\aftercpp\closeqprol}
+\def\protcpp{\bgroup\cppfont\let\next}
+
+%%%%%
+% Prolac mode
+%%
+
+\newskip\proltopsep
+
+\newenvironment{prolacindent}
+{\list{}{%
+	\listparindent \z@%
+	\leftmargin    \prolindent%
+	\itemindent    \z@
+	\rightmargin   0pt
+	\parsep        0pt}\raggedright%
+\item\relax%
+}{\endlist}
+
+
+\def\ifintable{\ifx\\\@tabularcr}
+\let\@beforeprolac\relax
+\def\proldefs{\let\v\pgv\let\b\pgb}
+\newif\if@inprolac
+
+\newenvironment{prolac}
+{\ifintable
+  \@minipagetrue
+  \def\@afterprolacenv{\vskip-\baselineskip\leavevmode}%
+  \def\@proldefs{\topsep\z@\leftmargin\z@}%
+ \else
+  \let\@afterprolacenv\relax
+  \def\@proldefs{\topsep\proltopsep\leftmargin\prolindent}%
+ \fi
+\list{}{\partopsep	\z@
+	\listparindent	\z@
+	\itemindent	\z@
+	\itemsep	\z@
+	\rightmargin	\z@
+	\parsep		\z@
+	\@proldefs
+	}\raggedright%
+\prolacfamily\item[]\prolmagicchars\proldefs\@beforeprolac\obeylines
+\@inprolactrue\relax%
+}{\endlist\@afterprolacenv}
+
+\def\@prol#1#2{\ifmmode\hbox\fi\bgroup#1\aftergroup#2%
+   \if@inprolac\else\prolmagicchars\proldefs\@inprolactrue\fi
+   \prolacfamily\let\next}
+\def\prol{\@prol\relax\relax}
+\let\pg\prol
+\def\vprol{\@prol\itshape\relax}
+\let\vp\vprol
+\let\pgv\vprol
+\def\highprol{\@prol\bfseries\relax}
+\let\pgb\highprol
+
+\def\protprol{\bgroup\prolacfamily\let\next}
+\def\pprol{\protect\protprol}
+
+\def\qprolkern{\kern.3pt\relax}
+
+\def\cmt{//~\nullcmt}
+\def\nullcmt{\hbox\bgroup
+  \fontfamily\rmdefault\fontshape{it}\ed@small\selectfont
+  \catcode`\-=12\catcode`\:=12\let\next
+}
+
+%%%%%
+% Other
+%%
+
+\def\gram#1{$\langle$\emph{#1}$\rangle$}%
+\def\gramopt#1{$\left[\mbox{#1}\right]$}
+\let\defemph\emph
+\let\v\emph
+\def\S{\char"D0\relax}
+\def\bullet{\char"D5\relax}
+\def\textbullet{\char"D5\relax}
+\def\rf{\S\ref}
+
+
+%%%%
+% Font sizes
+%%
+
+\let\ed@small\relax
+\def\documentsize#1{%
+  \ifnum#1=10
+   \def\ed@fnmarksize{\fontsize{6}{7}}%
+   \def\ed@small{\fontsize{9}{11}}%
+   \def\ed@normal{\fontsize{10}{12}}%
+   \def\normalsize{\@setfontsize\normalsize\@xpt\@xiipt\let\@listi\@listI}%
+   \def\large{\@setfontsize\large\@xiipt{14}}%
+   \def\Large{\@setfontsize\Large\@xivpt{18}}%
+   \def\footnotesize{\@setfontsize\footnotesize\@viiipt{9.5}}%
+   \def\@listi{\leftmargin\leftmargini
+            \parsep 4\p@ \@plus2\p@ \@minus\p@
+            \topsep 8\p@ \@plus2\p@ \@minus4\p@
+            \itemsep4\p@ \@plus2\p@ \@minus\p@}%
+   \let\@listI\@listi
+   \proltopsep=12pt
+  \else\ifnum#1=9
+   \def\ed@fnmarksize{\fontsize{6}{7}}%
+   \def\ed@small{\fontsize{9}{10}}%
+   \def\ed@normal{\fontsize{9}{10}}%
+   \def\normalsize{\@setfontsize\normalsize\@ixpt{10.5}\let\@listi\@listI}%
+   \def\large{\@setfontsize\large\@xiipt{14}}%
+   \def\Large{\@setfontsize\Large\@xivpt{18}}%
+   \def\footnotesize{\@setfontsize\footnotesize\@viiipt{9.5}}%
+   \def\@listi{\leftmargin\leftmargini
+            \parsep 4\p@ \@plus2\p@ \@minus\p@
+            \topsep 8\p@ \@plus2\p@ \@minus4\p@
+            \itemsep4\p@ \@plus2\p@ \@minus\p@}%
+   \let\@listI\@listi
+   \proltopsep=12pt
+  \else
+   \def\ed@fnmarksize{\fontsize{7.5}{9}}%
+   \def\ed@small{\fontsize{11}{13.6}}%
+   \def\ed@normal{\fontsize{12}{14.5}}%
+   \def\normalsize{\@setfontsize\normalsize\@xiipt{14.5}\let\@listi\@listI}%
+   \def\large{\@setfontsize\large\@xivpt{18}}%
+   \def\Large{\@setfontsize\Large\@xviipt{22}}%
+   \def\footnotesize{\@setfontsize\footnotesize\@xpt\@xiipt}%
+   \def\@listi{\leftmargin\leftmargini
+            \parsep 5\p@  \@plus2.5\p@ \@minus\p@
+            \topsep 10\p@ \@plus4\p@   \@minus6\p@
+            \itemsep5\p@  \@plus2.5\p@ \@minus\p@}%
+   \let\@listI\@listi
+   \proltopsep=10pt
+  \fi\fi
+  \ed@normal\selectfont
+}%
+
+\newif\ifincluded
+\includedfalse
+
+\makeatother
+\endinput

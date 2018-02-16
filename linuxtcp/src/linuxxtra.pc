@@ -1,0 +1,20 @@
+#ifndef LINUXXTRA_PC
+#define LINUXXTRA_PC
+
+module LinuxXtra.TCB :> ParentTCB
+has .Socket
+{
+  
+  field _sack_ok :> char @ 370;
+  field _sack_above_padding :> uint @ 428;
+
+  constructor(s :> *Socket) ::=
+    super.constructor(s),
+    _sack_ok = 0;
+  
+};
+
+module LinuxXtra.ParentTCB ::= CUR_TCB;
+#undef CUR_TCB
+#define CUR_TCB LinuxXtra.TCB
+#endif

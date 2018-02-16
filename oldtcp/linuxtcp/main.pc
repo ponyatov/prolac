@@ -1,0 +1,61 @@
+%{
+#include "support.c"
+%}
+
+#include "header.pc"
+#include "segment.pc"
+#include "tcb.pc"
+#include "window.pc"
+#include "input.pc"
+#include "reass.pc"
+#include "sock.pc"
+#include "timeout.pc"
+#include "rtt.pc"
+#include "retrans.pc"
+
+// HOOKUP. Include all the `Base' modules first; then include the extension
+// files in the order you want them applied.
+
+#include "delayack.pc"
+#include "quickack.pc"
+#include "slowst.pc"
+#include "fastret.pc"
+#include "predict.pc"
+
+#include "output.pc"
+#include "intrface.pc"
+
+#include "option.pc"
+#include "mss.pc"
+
+module TCB ::= CUR_TCB;
+module Input ::= CUR_INPUT;
+module Timeout ::= CUR_TIMEOUT;
+module Reassembly ::= CUR_REASSEMBLY;
+module Socket ::= CUR_SOCKET;
+module Output ::= CUR_OUTPUT;
+
+module Listen ::= CUR_LISTEN;
+module Syn-Sent ::= CUR_SYN_SENT;
+module Trim-To-Window ::= CUR_TRIM;
+module Reset ::= CUR_RESET;
+module Ack ::= CUR_ACK;
+module Fin ::= CUR_FIN;
+
+module Ethernet-Header ::= Headers.Ether;
+module Ip-Header ::= Headers.IP;
+module Tcp-Header ::= Headers.TCP;
+module Tcp-Tcb ::= TCB;
+module Segment ::= Base.Segment;
+
+export 
+  Tcp-Interface.init, Tcp-Interface.shutdown,
+  Tcp-Interface.listen, Tcp-Interface.accept,
+  Tcp-Interface.rcv,
+  Tcp-Interface.connect, Tcp-Interface.connect-poll,
+  Tcp-Interface.write, 
+  Tcp-Interface.read, Tcp-Interface.read-poll,
+  Tcp-Interface.close, Tcp-Interface.close-poll,
+  Tcp-Interface.wrapup,
+  Tcp-Interface.quick-timeout, 
+  Tcp-Interface.fast-timeout, Tcp-Interface.slow-timeout;

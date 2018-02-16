@@ -1,0 +1,60 @@
+#ifndef DELAYACK_PC
+#define DELAYACK_PC
+
+
+module Delay-Ack.TCB :> P-TCB has Segment {
+  
+  static F.delay-ack :> ushort ::= P-TCB.max-flag * 2;
+  static max-flag :> ushort ::= F.delay-ack;
+  
+  test-delay-ack :> bool ::= test-flag(F.delay-ack);
+  mark-delay-ack ::=
+    (test-delay-ack ==> mark-pending-ack)
+    || set-flag(F.delay-ack);
+
+  send-hook(seqlen :> uint) ::=
+    inline super.send-hook(seqlen),
+    clear-flag(F.delay-ack);
+  
+} inline TCB.all inline (F.delay-ack, mark-delay-ack);
+
+
+module Delay-Ack.Reassembly :> P-Reassembly {
+  
+  mark-ack-for-push ::=
+    mark-pending-ack;
+
+  easy-reassemble :> bool ::=
+    psh ? mark-ack-for-push : mark-delay-ack,
+    segment-to-user(seg),
+    seg->fin;
+  
+} inline easy-reassemble;
+
+
+module Delay-Ack.Timeout :> P-Timeout has .TCB, .Output {
+
+  fast ::= super.fast, process-loop(TCB.first-tcb);
+  
+  process-loop(tcb :> *TCB) ::=
+    tcb == TCB.sentinel ==> false
+    ||| process(tcb), process-loop(tcb->next-tcb);
+  
+  process(tcb :> *TCB) ::=
+    //{ PDEBUG("delayack.pc:process called.\n"); }
+    (tcb->test-delay-ack ==> tcb->mark-pending-ack, Output(tcb).do);
+  
+} inline (process-loop, process)
+  hide (process, process-loop);
+
+// hookup
+module Delay-Ack.P-TCB ::= CUR_TCB;
+module Delay-Ack.P-Reassembly ::= CUR_REASSEMBLY;
+module Delay-Ack.P-Timeout ::= CUR_TIMEOUT;
+#undef CUR_TCB
+#undef CUR_REASSEMBLY
+#undef CUR_TIMEOUT
+#define CUR_TCB		Delay-Ack.TCB
+#define CUR_REASSEMBLY	Delay-Ack.Reassembly
+#define CUR_TIMEOUT	Delay-Ack.Timeout
+#endif

@@ -1,0 +1,19 @@
+This directory contains a Prolac mode for Emacs, including a font lock
+option (for colored keywords and such). Here's one way to hook it into your
+`~/.emacs' file.
+
+	Put the file in a directory `DIR' and add this code to
+	`~/.emacs':
+
+	(setq load-path (cons (expand-file-name DIR) load-path))
+	(defun prolac-mode ()
+	  "Load Prolac mode."
+	  (interactive)
+	  (load-library "prolac-mode")
+	  (prolac-mode))
+	(setq auto-mode-alist
+	      (cons '("\\.pc$" . prolac-mode) auto-mode-alist))
+
+Now Prolac mode will be loaded automatically when you visit a file with
+extension `.pc'.
+

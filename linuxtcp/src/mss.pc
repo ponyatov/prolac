@@ -1,0 +1,107 @@
+#ifndef MSS_PC
+#define MSS_PC
+#define OPTION_MSS_KIND		2
+#define OPTION_MSS_LENGTH	4
+
+module MSS.Output :> ParentOutput
+has Util, .Segment, Headers.IP, Headers.TCP
+{
+  build-tcp-options(seg :> *Segment) :> int ::=
+    let l = super.build-tcp-options(seg) in
+      (should-send-mss ==> l += build-mss(seg)),
+      l
+    end;
+  
+  should-send-mss :> bool ::=
+    should-send-syn;
+  
+  build-mss(seg :> *Segment) :> int ::=
+    let data :> *uchar in
+      { data = skb_put((struct sk_buff *)seg, OPTION_MSS_LENGTH); },
+      data[0] = OPTION_MSS_KIND,
+      data[1] = OPTION_MSS_LENGTH,
+      *((*ushort)((*void)(data+2))) = htons(socket->sending-route-max-transfer - IP.header-size - TCP.min-header-size),
+      OPTION_MSS_LENGTH
+    end;
+  
+} hide (should-send-mss, build-mss);
+
+
+module MSS.Input :> ParentInput
+has Headers.IP, Headers.TCP, Util
+{
+  
+  process-option(data :> *uchar, len :> int) ::=
+    ((data[0] == OPTION_MSS_KIND) && (data[1] == OPTION_MSS_LENGTH))
+    ==> process-mss(data, len)
+    ||| inline super.process-option(data, len);
+  
+  process-mss(data :> *uchar, len :> int) ::=
+    let mss = ntohs(*(*ushort)((*void)(data + 2))) in
+      tcb->mark-mss-option(mss ? TCP_DEFAULT_MSS - IP.header-size - TCP.min-header-size : mss)
+    end;
+  
+} hide (process-mss);
+
+
+module MSS.Socket :> ParentSocket
+{
+  field _padding_1 :> *void @ 60;
+  
+  last-sending-route-max-transfer :> uint ::=
+    let mtu :> uint in
+      { struct sock *sk = (struct sock *)&self;
+	mtu = (sk->dst_cache ? sk->dst_cache->pmtu : 0x7FFFFFFF);
+      }, mtu
+    end;
+  
+  sending-route-max-transfer :> uint ::=
+    TCP_DEFAULT_MSS;		// This is for crap. What should we really send?
+  
+} hide "Socket._*";
+
+
+module MSS.TCB :> ParentTCB
+has Headers.IP, Headers.TCP
+{
+  
+  field _device_mtu_cache :> uint @ 228;
+  field _mss_cache :> ushort @ 232;
+  field _mss_clamp :> ushort @ 234;
+  field _user_mss :> ushort @ 284;
+  
+  sync-mss-cache(cur-device-mtu :> uint) ::=
+    _device_mtu_cache = cur-device-mtu,
+    let mss = cur-device-mtu - IP.header-size - TCP.min-header-size in
+      mss min= _mss_clamp,
+      /* mss -= _ext_header_len, - don't want to think about IP options */
+      mss max= 8,
+      _mss_cache = mss
+    end;
+  
+  mark-mss-option(mss :> ushort) ::=
+    _mss_clamp = min(mss, _user_mss),
+    sync-mss-cache(_device_mtu_cache);
+  
+  mss :> ushort ::=		// not including IP or TCP options
+    let cur-device-mtu = socket->last-sending-route-max-transfer in
+      (cur-device-mtu != _device_mtu_cache ==> sync-mss-cache(cur-device-mtu))
+    end,
+    _mss_cache;
+  
+} hide ("TCB._*", sync-mss-cache);
+
+// hookup
+module MSS.ParentOutput ::= CUR_OUTPUT;
+module MSS.ParentInput ::= CUR_INPUT;
+module MSS.ParentSocket ::= CUR_SOCKET;
+module MSS.ParentTCB ::= CUR_TCB;
+#undef CUR_OUTPUT
+#undef CUR_INPUT
+#undef CUR_SOCKET
+#undef CUR_TCB
+#define CUR_OUTPUT	MSS.Output
+#define CUR_INPUT	MSS.Input
+#define CUR_SOCKET	MSS.Socket
+#define CUR_TCB		MSS.TCB
+#endif /* MSS_PC */

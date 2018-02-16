@@ -1,0 +1,12 @@
+Highest priority
+
+- complete Linux 2.2 TCP
+- careful code rearrangement
+
+Medium priority
+
+- add more options (sack, fack, ecn, timestamp options)
+- urgent processing
+- persist, keepalive timers
+- make it work in Berkeley NS
+- make it work at user level with BPF

@@ -1,0 +1,99 @@
+#ifndef FASTRET_PC
+#define FASTRET_PC
+#include "slowst.pc"
+
+module FastRetransmit.TCB :> ParentTCB
+has .Socket
+{
+  
+  field _duplicate_acks :> uchar @ 282;
+  
+  static dup-ack-rexmit-count :> uchar ::= 3;
+  
+  constructor(s :> *Socket) ::=
+    ParentTCB(s),
+    reset-duplicate-count;
+  
+  reset-duplicate-count ::= 
+    _duplicate_acks = 0;
+  step-duplicate-count ::=
+    _duplicate_acks < 200 ==> _duplicate_acks++;
+  duplicate-signals-retransmit :> bool ::=
+    _duplicate_acks == dup-ack-rexmit-count;
+  duplicate-signals-congestion-avoidance :> bool ::=
+    _duplicate_acks > dup-ack-rexmit-count;
+  
+  retransmit-alarm ::=
+    reset-duplicate-count,	// do it first so Output gets new window
+    super.retransmit-alarm;
+  
+  
+  increase-cwnd-for-fast-retransmit {
+    
+    increase-cwnd-for-fast-retransmit ::=
+      set-congestion-window-to-threshhold, help(dup-ack-rexmit-count);
+    
+    help(i :> int) ::=
+      i <= 0 ==> true
+      ||| fast-increase-cwnd, help(i - 1);
+    
+  }
+  
+  decrease-cwnd-after-fast-retransmit ::=
+    _duplicate_acks >= dup-ack-rexmit-count ==>
+      (!below-threshhold ==> set-congestion-window-to-threshhold);
+  
+};
+
+
+module FastRetransmit.Ack :> ParentAck 
+has .Output {
+  
+  duplicate ::=
+    (seg->len == 0 && seg->window == send-window-advertised
+     ==> empty-duplicate)
+    ||| reset-duplicate-count, super.duplicate;
+  
+  normal ::=
+    decrease-cwnd-after-fast-retransmit,
+    super.normal;
+    
+  empty-duplicate ::=
+    (!is-retransmit-set ==> { PDEBUG("empty-dupicate0\n"); } false)
+    || (tcb->_snd_una != seg->ackno ==> false)
+    || do-fast-retransmit;
+  
+  do-fast-retransmit ::=
+    step-duplicate-count,
+    (duplicate-signals-retransmit ==> retransmit)
+    || (duplicate-signals-congestion-avoidance ==> congestion-avoidance),
+    drop;
+
+  retransmit ::=
+    reduce-ssthresh,
+    cancel-retransmit,
+    // XXX BSDMeasure clear-timing-rtt,
+    let old-next = tcb->_snd_nxt in
+      tcb->_snd_nxt = seg->ackno,
+      //{ printk("fastret\n"); }
+      Output(tcb).run,
+      tcb->_snd_nxt = max(old-next, tcb->_snd_nxt),
+    end,
+    increase-cwnd-for-fast-retransmit;
+  
+  congestion-avoidance ::=
+    fast-increase-cwnd, /* XXX BSD deosn't compare with max window size here */
+    //{PDEBUG("fastret.pc:congestion-avoidance.\n");}
+    Output(tcb).run;
+  
+} inline (duplicate, normal);
+
+
+// hookup
+module FastRetransmit.ParentTCB ::= CUR_TCB;
+module FastRetransmit.ParentAck ::= CUR_ACK;
+#undef CUR_TCB
+#undef CUR_ACK
+#define CUR_TCB		FastRetransmit.TCB
+#define CUR_ACK		FastRetransmit.Ack
+#endif

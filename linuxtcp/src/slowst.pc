@@ -1,0 +1,85 @@
+#ifndef SLOWST_PC
+#define SLOWST_PC
+#define TCP_SSTHRESH  65535
+/* 18.Aug.1999 - Previous versions of slowst.pc measured the congestion window
+   in bytes, as per BSD. Now, to match Linux's implementation, we measure it
+   in packets. */
+
+module SlowStart.TCB :> ParentTCB has .Socket {
+  
+  field _snd_cwnd :> uint @ 252;      // Congestion window in packets
+  field _snd_cwnd_fraction :> ushort @ 280; // Congestion window in packets
+			// is really `_snd_cwnd + _snd_cwnd_fraction/_snd_cwnd'
+  field _snd_ssthresh :> uint @ 276; // Slow start threshold size in packets
+  
+  constructor(s :> *Socket) ::= 
+    ParentTCB(s),
+    _snd_cwnd = 2,		// 2 packets
+    _snd_cwnd_fraction = 0,
+    _snd_ssthresh = 0x7FFFFFFF; // infinity
+  
+  below-threshhold :> bool ::=
+    _snd_cwnd <= _snd_ssthresh;
+  
+  increase-cwnd ::=
+    (below-threshhold ==> fast-increase-cwnd)
+    || slow-increase-cwnd,
+    _snd_cwnd = min(_snd_cwnd, max-window-size);
+  
+  fast-increase-cwnd ::=
+    _snd_cwnd++;
+  slow-increase-cwnd ::=	// congestion avoidance.
+    // Amounts to `_snd_cwnd += 1/_snd_cwnd'
+    _snd_cwnd_fraction++,
+    (_snd_cwnd_fraction >= _snd_cwnd ==> _snd_cwnd++, _snd_cwnd_fraction = 0);
+  
+  set-congestion-window-to-threshhold ::=
+    _snd_cwnd = _snd_ssthresh;
+  
+  reduce-ssthresh ::=
+    let send-window-packets = super.send-window / max(mss, 1) in
+      let smaller-window = min(send-window-packets, _snd_cwnd) in
+        // new ssthresh is the smaller of the two windows, cut in half
+        _snd_ssthresh = max(smaller-window / 2, 2),
+	_snd_cwnd = 1,
+	_snd_cwnd_fraction = 0
+      end
+    end;
+  
+  retransmit-alarm ::=
+    reduce-ssthresh,		// do it first so Output gets new window
+    super.retransmit-alarm;
+  
+  
+  // ACKNOWLEDGEMENTS
+  
+  new-ack-hook(seqno :> seqint) ::=
+    super.new-ack-hook(seqno),
+    !retransmitting ==> increase-cwnd;
+  
+  
+  send-window :> uint ::=	// see note below
+    min(super.send-window, _snd_cwnd * mss);
+  
+  
+  print ::= 
+    super.print, {
+      PDEBUG("    ssthresh %d  cwnd %d\n", _snd_ssthresh, _snd_cwnd);
+    };
+  
+} inline (send-window, set-congestion-window-to-threshhold,
+	  reduce-ssthresh)
+  inline[0] print
+  hide (_snd_cwnd, _snd_cwnd_fraction, _snd_ssthresh);
+
+
+/* Linux note: Linux only checks snd_wnd, not snd_cwnd. Then it does a special
+   check before sending a data packet to ensure that not more than snd_cwnd
+   packets are in flight. */
+
+// hookup
+module SlowStart.ParentTCB ::= CUR_TCB;
+#undef CUR_TCB
+#define CUR_TCB		SlowStart.TCB
+//#define CUR_TIMEOUT	SlowStart.Timeout
+#endif

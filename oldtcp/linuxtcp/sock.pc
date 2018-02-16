@@ -1,0 +1,237 @@
+#ifndef SOCK_PC
+#define SOCK_PC
+
+module Base.Socket
+has .Segment, Segment-Link, .TCB {
+  
+  field lport :> int;
+  field rport :> int;
+  
+  field head :> *Socket;
+  field queue :> *Socket;
+  field queue-len :> int;
+  
+  field rcv-buf :> Segment-Link;
+  field rcv-len :> int;
+  field snd-buf :> Segment-Link;
+  field snd-len :> int;
+
+  field has-filedesc :> bool;
+  
+  field tcb :> *TCB using (receive-window-left, receive-window-right);
+  
+  constructor(lp :> int, rp :> int) ::=
+    head = queue = 0,
+    queue-len = 0,
+    rcv-buf.make-link-sentinel,
+    snd-buf.make-link-sentinel,
+    rcv-len = 0,
+    snd-len = 0,
+    lport = lp,
+    rport = rp,
+    has-filedesc = true;
+
+  free ::=
+    rcv-buf.free-link-chain(true),
+    snd-buf.free-link-chain(false),
+    { PDEBUG("freeing socket.\n"); kfree(&self); };
+  
+  local-port :> int ::= lport;
+  remote-port :> int ::= rport;
+  
+  
+  // NAVIGATION
+  
+  first-send-segment :> *Segment ::=
+    snd-buf.next-segment(&snd-buf);
+  next-send-segment(seg :> *Segment) :> *Segment ::=
+    seg->next-segment(&snd-buf);
+  first-rcv-segment :> *Segment ::=
+    rcv-buf.next-segment(&rcv-buf);
+  next-rcv-segment(seg :> *Segment) :> *Segment ::=
+    seg->next-segment(&rcv-buf);
+  
+  
+  // RECEIVING
+  
+  can-receive :> bool ::= receivable-length > 0;	// BSD !(so->so_state & SS_CANTRCVMORE)
+  
+  receivable-length :> uint ::=	// BSD sbspace(&so_rcv)
+    max(max-receive-buffer-length - rcv-len, 0);
+  max-receive-buffer-length :> uint ::= // BSD so_rcv.sb_hiwat
+    32768; /* XXX */
+  
+  receive-data(seg :> *Segment) ::=
+    { PDEBUG("receiving data.\n"); }
+    seg->insert-link-before(&rcv-buf),
+    //{ save_flags(flags); cli(); }
+    rcv-len += seg->len;
+    //{ restore_flags(flags);}
+  
+  
+  // SENDING
+  
+  sendable :> bool ::=			// BSD so_snd.sb_cc
+    snd-len > tcb->unsent-offset;
+  
+  sendable-length :> uint ::=	// BSD so_snd.sb_cc
+    sendable ? snd-len - tcb->unsent-offset : 0;
+  
+  send-data-into {
+    
+    send-data-into(seg :> *Segment, data-len :> uint) ::=
+      help(first-send-segment, seg, tcb->unsent-offset, 0, data-len);
+      
+    
+    help(from :> *Segment, into :> *Segment, off :> uint,
+	 into-off :> uint, datalen :> uint) ::=
+      (!from || !datalen ==> true)
+      || (off >= from->data-length ==> help(next-send-segment(from), into,
+				    off - from->data-length, into-off, datalen))
+      || one-into(from, into, off, into-off, datalen);
+    
+    one-into(from :> *Segment, into :> *Segment, off :> uint,
+	     into-off :> uint, datalen :> uint) ::=
+      let here = min(datalen, from->data-length - off) in
+	from->copy-into(off, here, into, into-off),
+	help(next-send-segment(from), into,
+	     0, into-off + here, datalen - here)
+      end;
+    
+  }
+  
+  
+  // USER REQUESTS
+  
+  // ... NOTE: except that BSD only does sorwakeup() once.
+  mark-readable ::= true;	// BSD sorwakeup(so)
+  mark-writable ::= true;	// BSD checkl SB_NOTIFY, sowwakeup(so) ????????
+  
+  user-read {
+    
+    user-read(buf :> *char, want :> uint) :> uint ::=
+      //{ PDEBUG("sock->user-read called with want = %d\n", want); },
+      let byte-count :> uint in
+        byte-count = help(first-rcv-segment, buf, want, 0),
+        //{ save_flags(flags); cli(); }
+        rcv-len -= byte-count,
+	//{ restore_flags(flags); }
+	let rl = receive-window-left, rr = receive-window-right in
+	{ PDEBUG("sock->user-read returning %d (%d) %d-%d\n", 
+		 byte_count, rcv_len, rl, rr); } end,
+        byte-count
+      end;
+        
+    
+    help(seg :> *Segment, buf :> *char, want :> uint, got :> uint) :> uint ::=
+      (!seg || want <= 0 ==> got)
+      ||| let copy = min(seg->data-length, want), next = next-rcv-segment(seg) in
+            { memcpy(buf, seg->_data, copy); },
+	    (copy >= seg->data-length 
+	     ==> /* {printk("User read data from queue. Freeing...\n"); }, */
+	         seg->delete-link, seg->free-read)
+	    || seg->trim-front(copy),
+	    help(next, buf + copy, want - copy, got + copy)
+	  end;
+    
+  }
+  
+  user-write(buf :> *char, want :> uint) :> uint ::=
+    let seg = Segment.new(want) in
+      (seg ==> ( { memcpy(skb_put((struct sk_buff *)seg, want), buf, want); }
+		seg->insert-link-before(&snd-buf),
+		snd-len += want )),
+      seg ? want : 0
+    end;
+  
+  
+  // CLOSING
+  
+  user-close ::=
+    { PDEBUG("USER CLOSE\n"); }
+    tcb->mark-close-after(sendable-length),
+    has-filedesc = false;
+  
+  drop ::= true;
+  
+  
+  // RETRANSMISSION
+  
+  remove-old-data {
+    
+    remove-old-data(amt :> uint) ::=
+      amt min= snd-len,
+      snd-len -= amt,
+      help(amt);
+    
+    help(amt :> uint) ::=
+      let from = first-send-segment in
+        (!from || !amt ==> true)
+        ||| (amt < from->data-length ==> 
+	     from->data-trim-front(amt))
+        ||| let l = from->data-length in
+      	      from->delete-link,
+	      from->free-write,
+              help(amt - l)
+    	    end
+      end;
+    
+  }
+  
+  
+  // ALLOCATION/DEALLOCATION
+  
+  static new(lport :> int, rport :> int) :> *Socket ::=
+    let so :> *Socket in
+      { so = (Socket *)kmalloc(sizeof(Socket), intr_count ? GFP_ATOMIC : GFP_KERNEL); 
+      if (!so) {
+	printk("<1>prolac: ERROR! unable to allocate new socket!\n");
+      }
+      },
+        // XXX frans htons'ed the ports??
+      (so ==> so->constructor(lport, rport)),
+      so
+    end;
+  
+  static new-listen(lport :> int) :> *Socket ::=
+    let so :> *Socket = new(lport, ANYPORT) in
+      so->tcb = TCB.new-listen(so),
+      so
+    end;
+  
+  static new-active-open(lport :> int, rport :> int) :> *Socket ::=
+    let so :> *Socket = new(lport, rport) in
+      (so ==> so->tcb = TCB.new-active-open(so)),
+      so
+    end;
+  
+  new-passive-open(irs :> seqint, remote-port :> ushort) :> *Socket ::=
+    let so :> *Socket = new(tcb->local-port, remote-port) in
+      so->tcb = TCB.new-passive-open(so, irs),
+      so->head = &self,
+      so->queue = queue,
+      queue = so,
+      queue-len++,
+      so
+    end;
+  
+  
+  // PRINTING
+  
+  print ::=
+    { PDEBUG("   -- %s sock: READBUF ", program_name); }
+    rcv_buf.print-link-chain,
+    { PDEBUG("\n                   WRITBUF "); }
+    snd_buf.print-link-chain,
+    { PDEBUG("\n"); }
+    tcb->print;
+  
+} inline (sendable, sendable-length,
+	  send-data-into.help, send-data-into.one-into)
+  inline[0] print
+  hide (lport, rport, head, queue-len, rcv-buf, snd-buf, 
+	constructor, new, first-send-segment, next-send-segment);
+
+// hookup
+#define CUR_SOCKET	Base.Socket
+#endif

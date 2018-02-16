@@ -1,0 +1,111 @@
+#ifndef RETRANS_PC
+#define RETRANS_PC
+
+module Retransmit-M.TCB :> P-TCB has .Socket, .Output, Tcp-Tcb {
+  
+  field rexmit-timeout :> short;
+  field rexmit-shift :> short;
+  
+  constructor(s :> *Socket) ::=
+    P-TCB(s),
+    rexmit-shift = 0,
+    calculate-retransmit-timeout;
+  
+  
+  // RETRANSMISSION BACKOFF
+  
+  max-shift :> short ::= 12;
+  
+  step-backoff :> bool ::=
+    rexmit-shift++,
+    (rexmit-shift > max-shift ==> rexmit-shift = max-shift);
+  
+  backoff-value :> short ::=
+    (rexmit-shift <= 5 ==> 1 << rexmit-shift) ||| 64;
+  
+  
+  // RETRANSMIT TIMEOUT VALUE
+  
+  max-retransmit-timeout :> short ::= 128;
+  
+  calculate-retransmit-timeout ::=
+    let to = estimated-rtt * backoff-value in
+      to max= min-rtt,
+      to min= max-retransmit-timeout,
+      rexmit-timeout = to,
+#ifdef PRINT
+      print-retransmission-values
+#endif
+    end;
+  
+  
+  // RETRANSMIT TIMER
+  
+  start-retransmit-timer ::=
+#ifdef PRINT
+    { PDEBUG("starting retransmit timer -> %d\n", rexmit_timeout); }
+#endif
+    set-retransmit-timer(rexmit-timeout);
+  
+  retransmit-alarm ::=
+    super.retransmit-alarm,
+    do-alarm;
+  
+  do-alarm {
+    
+    do-alarm ::=
+      (step-backoff ==> too-much-backoff)
+      || ok;
+    
+    too-much-backoff ::=
+      { assert(0 && "dropping connection"); };
+    
+    ok ::=
+      calculate-retransmit-timeout,
+      start-retransmit-timer,
+      (connection-losing ==> notify-losing),
+      start-retransmission,
+      Output((*Tcp-Tcb)&self).do;
+    
+    connection-losing :> bool ::=
+      rexmit-shift > 3;
+    
+    notify-losing ::=
+      /* SOCK in_losing v2p842 */
+      transparently-revoke-rtt-estimate;
+    
+  }
+  
+  
+  // MARKS
+  
+  update-rtt-estimate(rtt :> short) ::=
+    inline super.update-rtt-estimate(rtt),
+    rexmit-shift = 0,
+    calculate-retransmit-timeout;
+  
+  total-ack-hook ::= super.total-ack-hook, cancel-retransmit;
+  
+  send-hook(seqlen :> uint) ::=
+    inline super.send-hook(seqlen),
+    (!is-retransmit-set && !recently-acked ==> start-retransmit-timer
+     /* XXX persist */);
+  
+  
+  // PRINTING
+  
+  print-retransmission-values ::=
+    let xx = backoff-value in
+      { PDEBUG("set rexmit to %d (%d/%d)\n",
+	       rexmit_timeout, rexmit_shift, xx); }
+    end;
+
+} inline (backoff-value)
+  hide (rexmit-shift, rexmit-timeout, backoff-value, max-shift, step-backoff,
+	set-retransmit-timer);
+
+// hookup
+module Retransmit-M.P-TCB ::= CUR_TCB;
+#undef CUR_TCB
+#define CUR_TCB		Retransmit-M.TCB
+#endif

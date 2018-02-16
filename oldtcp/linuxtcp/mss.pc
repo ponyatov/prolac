@@ -1,0 +1,59 @@
+#ifndef MSS_PC
+#define MSS_PC
+
+#define OPTION_MSS_KIND		2
+#define OPTION_MSS_LENGTH	4
+
+module Mss.Output :> P-Output has .Byte-Order, .Segment
+{
+    build-tcp-options(seg :> *Segment) :> int ::=
+      let l = super.build-tcp-options(seg) in
+        (should-send-mss ==> l += build-mss(seg)),
+        l
+      end;
+      
+    should-send-mss :> bool ::= !established-or-after;
+
+    build-mss(seg :> *Segment) :> int ::=
+      let data :> *uchar in
+        { data = skb_put((struct sk_buff *)seg, OPTION_MSS_LENGTH);
+	  memset(data, 0, 4);
+	},
+	data[0] = OPTION_MSS_KIND,
+	data[1] = OPTION_MSS_LENGTH,
+	*((*ushort)((*void)(data+2))) = htons(seg->device-mtu - 40),
+	OPTION_MSS_LENGTH
+      end;
+					 
+} hide (should-send-mss, build-mss);
+
+module Mss.Input :> P-Input has .Byte-Order, .Segment
+{
+  process-option(data :> *uchar, len :> int) ::=
+    ((data[0] == OPTION_MSS_KIND) && (data[1] == OPTION_MSS_LENGTH))
+    ==> process-mss(data, len)
+    ||| super.process-option(data, len);
+
+  process-mss(data :> *uchar, len :> int) ::=
+    // should take minimum of device mss and offered mss
+    tcb->mss = min(ntohs(*(*ushort)((*void)data+2)), seg->device-mtu - 40),
+    true;
+    
+} hide (process-mss);
+
+//hookup
+module Mss.P-Output ::= CUR_OUTPUT;
+module Mss.P-Input ::= CUR_INPUT;
+
+#undef CUR_OUTPUT
+#undef CUR_INPUT
+
+#define CUR_OUTPUT	Mss.Output
+#define CUR_INPUT	Mss.Input
+
+#endif /* MSS_PC */
+
+
+
+
+

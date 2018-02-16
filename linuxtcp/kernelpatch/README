@@ -1,0 +1,31 @@
+This directory contains a small patch to Linux 2.2.11. It adds a new
+CONFIG_TCP_ALTERNATE_STACK configuration option, which lets the user
+dynamically install an alternate TCP stack. The patch may work on earlier
+or later versions of Linux 2.2.
+
+Apply this patch to your Linux sources with the `patch' program. You might
+do this:
+
+	% cd /usr/src/linux
+	% patch -p1 < PROLACDIR/linuxtcp/kernelpatch/diffs
+
+Now run `make menuconfig' and turn on the CONFIG_TCP_ALTERNATE_STACK
+option. Finally, recompile your kernel and install it.
+
+It's easy for a downloadable kernel module to install an alternate TCP
+stack. Simply set these three variables, which are exported by the kernel:
+
+    extern struct proto *alternate_tcp_prot;
+    extern int (*alternate_tcp_rcv)(struct sk_buff *, unsigned short);
+    extern void (*alternate_tcp_err)(struct sk_buff *, unsigned char *, int);
+
+These variables are initially 0.
+
+New TCP sockets normally have their `prot' field set to `tcp_prot', the
+global `struct proto' that points to all of Linux's default TCP functions.
+When this patch is enabled, a new socket's `prot' is set to
+`alternate_tcp_prot' if it's non-null, or the default `tcp_prot' otherwise.
+A similar strategy is used for incoming TCP packets and ICMP errors. Linux
+will try its own TCP stack first (the `tcp_v4_rcv' and `tcp_v4_err'
+functions). If no matching socket is found for a packet, Linux will pass
+the packet to `alternate_tcp_rcv' or `alternate_tcp_err' if they are set.

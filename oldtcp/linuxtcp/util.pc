@@ -1,0 +1,58 @@
+#ifndef UTIL_PC
+#define UTIL_PC
+
+#undef htons
+#undef ntohs
+#undef htonl
+#undef ntohl
+
+module Byte-Order {
+  
+  static htons(m :> ushort) :> ushort ::=
+    let q :> ushort in { q = __htons(m); }, q end;
+  static ntohs(m :> ushort) :> ushort ::=
+    let q :> ushort in { q = __ntohs(m); }, q end;
+  static htonl(m :> ulong) :> ulong ::=
+    let q :> ulong in { q = __htonl(m); }, q end;
+  static ntohl(m :> ulong) :> ulong ::=
+    let q :> ulong in { q = __ntohl(m); }, q end;
+  
+} inline all using all;
+
+
+module Checksum {
+  
+  field x :> ulong;
+  
+  constructor ::= x = 0;
+  
+  do(data :> *void, len :> uint) ::=
+  &len, (len > 0 ==> let i = x in {
+	       ushort *m = (ushort *)data;
+	       while (len > 1) {
+		 i += *m++;
+		 if (i & 0x80000000) i = (i & 0xFFFF) + (i >> 16);
+		 len -= 2;
+	       }
+	       if (len)
+		 i += (unsigned short) *(unsigned char *)m;
+	 }, x = i end);
+  
+  value :> ushort ::= let sum = x in {
+			while (sum >> 16)
+			  sum = (sum & 0xFFFF) + (sum >> 16);
+		      }, ~sum end;
+
+  good :> bool ::= value == 0;
+  
+} hide x inline all;
+
+
+module Compile-Options {
+  
+  static do-ip-checksum :> bool ::= true;
+  static do-tcp-checksum :> bool ::= true;
+  
+} using all;
+
+#endif

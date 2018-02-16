@@ -1,0 +1,104 @@
+#ifndef TIMEOUT_PC
+#define TIMEOUT_PC
+
+module Base.Timeout has .TCB, .Output {
+  
+  quick ::= true;
+  fast ::= true;
+  slow ::= // BSD splnet
+    //{ PDEBUG("TIMEOUT\n"); tcp_send_all_penders(); },
+    slow-loop(TCB.first-tcb),
+    TCB.step-global-iss;
+    // XXX tcp_now++ for timestamps
+    // BSD splx
+  
+  slow-loop(tcb :> *TCB) ::=
+    tcb == TCB.sentinel ==> false
+    ||| tcb->slow-timer, slow-loop(tcb->next-tcb);
+  
+} inline (fast, slow, slow-loop);
+
+
+module Timeout-M.TCB :> P-TCB has .Socket {
+  
+  field T.retransmit :> short;
+  field T.persist :> short;
+  field T.keep :> short;
+  field T.twomsl :> short;
+  field idle :> short;
+  
+  constructor(s :> *Socket) ::=
+    P-TCB(s),
+    cancel-timers;
+  
+  cancel-timers ::=
+    T.retransmit = T.persist = T.keep = T.twomsl = 0;
+  
+  enter-time-wait ::=
+    super.enter-time-wait, cancel-timers, start-timewait-timer;
+  
+  start-retransmission ::=
+    super.start-retransmission,
+    cancel-retransmit;
+  
+  close-connection ::=
+    super.close-connection, cancel-timers;
+  
+  
+  slow-timer ::=
+    (T.retransmit && !--T.retransmit ==> retransmit-alarm),
+    (T.persist    && !--T.persist    ==> persist-alarm),
+    (T.keep       && !--T.keep       ==> keep-alarm),
+    (T.twomsl     && !--T.twomsl     ==> twomsl-alarm),
+    idle++;
+  
+  static sec2tick(sec :> short) :> short ::= sec * 2;
+  static max-idle :> short ::=
+    8 /* maximum # keepalive probes */ * sec2tick(75);
+  static msl :> short ::= sec2tick(30);
+  
+  
+  set-retransmit-timer(v :> short) ::= T.retransmit = v;
+  cancel-retransmit ::= T.retransmit = 0; 
+  is-retransmit-set :> bool ::= T.retransmit;
+  retransmit-alarm ::= true;
+  
+  
+  keep-alarm ::= true; /* XXX v2p829 */
+  
+  
+  cancel-persist ::= true;
+  persist-alarm ::= true; /* XXX v2p827 */
+  
+  
+  start-timewait-timer ::= T.twomsl = 2 * msl;
+  start-fin-wait-2-timer ::= T.twomsl = sec2tick(75);
+  twomsl-alarm {
+    // Used for 2 purposes: in fin-wait-2, the keepalive timer;
+    // in time-wait, the 2MSL timer.
+    twomsl-alarm ::=
+      //{ PDEBUG("timeout.pc twomsl-alarm expired.\n"); }
+      (time-wait ==> do-time-wait)
+      || do-fin-wait-2;
+    
+    do-time-wait ::=
+      // XXX call interface function?
+      close-connection;
+    do-fin-wait-2 ::=
+      (idle <= max-idle ==> start-fin-wait-2-timer)
+      || /* XXX call interface function? */ close-connection;
+  }
+  
+} inline (cancel-timers, sec2tick, slow-timer,
+	  cancel-retransmit, cancel-persist,
+	  start-timewait-timer, start-fin-wait-2-timer)
+  inline[0] (retransmit-alarm, persist-alarm, keep-alarm, twomsl-alarm)
+  hide (T, msl);
+
+
+// hookup
+module Timeout-M.P-TCB ::= CUR_TCB;
+#undef CUR_TCB
+#define CUR_TIMEOUT	Base.Timeout
+#define CUR_TCB		Timeout-M.TCB
+#endif

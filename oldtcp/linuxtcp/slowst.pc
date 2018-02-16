@@ -1,0 +1,79 @@
+#ifndef SLOWST_PC
+#define SLOWST_PC
+#define TCP_SSTHRESH  65535
+
+module Slow-Start.TCB :> P-TCB has .Socket {
+  
+  field snd_cwnd :> uint;      /* Congestion window */
+  field snd_ssthresh :> seqint; /* Slow start threshold size */
+  
+  constructor(s :> *Socket) ::= 
+    P-TCB(s),
+    snd_cwnd = 1460,
+    snd_ssthresh = max-window-size;
+  
+  below-threshhold :> bool ::= snd_cwnd <= snd_ssthresh;
+  
+  increase-cwnd ::=
+    (below-threshhold ==> fast-increase-cwnd)
+    || slow-increase-cwnd,
+    snd_cwnd = min(snd_cwnd, max-window-size);
+
+  fast-increase-cwnd ::= snd_cwnd += mss;
+  slow-increase-cwnd ::= snd_cwnd += mss * mss / snd_cwnd;
+  
+  set-congestion-window-to-threshhold ::=
+    snd_cwnd = snd_ssthresh;
+  
+  decrease-ssthresh ::=
+    snd_ssthresh = min(snd_cwnd, send-window) / 2,
+    snd_ssthresh = max(snd_ssthresh, 2 * mss);
+  
+  reset-ssthresh ::=
+    let w = max(send-window / (2 * mss), 2) in
+      snd_cwnd = mss,
+      snd_ssthresh = w * mss
+    end;
+  
+  retransmit-alarm ::=
+    reset-ssthresh,		// do it first so Output gets new window
+    super.retransmit-alarm;
+  
+  // ACKNOWLEDGEMENTS
+  
+  // XXX belongs here?
+  new-ack-hook(seqno :> seqint) ::=
+    super.new-ack-hook(seqno), !retransmitting ==> increase-cwnd;
+  
+  
+  send-window :> uint ::= min(super.send-window, snd_cwnd);
+  
+  print ::= 
+    super.print, {
+      PDEBUG("    ssthresh %d  cwnd %d\n", snd_ssthresh, snd_cwnd);
+    };
+  
+} inline (send-window, decrease-ssthresh, set-congestion-window-to-threshhold,
+	  reset-ssthresh)
+  inline[0] print
+  hide (snd_cwnd, snd_ssthresh);
+
+
+module Slow-Start.Ack :> P-Ack has Tcp-Tcb, Segment {
+  
+//  normal ::=
+//    super.normal,
+//    increase-cwnd;
+  
+} inline all;
+
+
+// hookup
+module Slow-Start.P-TCB ::= CUR_TCB;
+module Slow-Start.P-Ack ::= CUR_ACK;
+#undef CUR_TCB
+#undef CUR_ACK
+#define CUR_TCB		Slow-Start.TCB
+#define CUR_ACK		Slow-Start.Ack
+//#define CUR_TIMEOUT	Slow-Start.Timeout
+#endif

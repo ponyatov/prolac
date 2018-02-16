@@ -1,0 +1,193 @@
+#ifndef SOCK_PC
+#define SOCK_PC
+#define AS_SOCK(sk)	((struct sock *)(sk))
+
+module Base.Socket
+has .Segment, SegmentList, .TCB, TopSocket {
+  
+  field _sklist_next :> *TopSocket @ 0;
+  field _sklist_prev :> *TopSocket @ 4;
+  
+  field _local_port :> ushort @ 42;
+  field _remote_port :> ushort @ 24;
+  
+  field _rcv_queue :> SegmentList @ 68;
+  field _snd_queue :> SegmentList @ 84;
+
+  field _rcv_buf :> int @ 52;
+
+  field _back_log :> SegmentList @ 144;
+  
+  
+  tcb :> *TCB ::=
+    (*TCB)((*void)&self);
+  
+  constructor ::=
+    /* XXX */;
+
+  static initialize(sk :> *TopSocket) ::=
+    sk->constructor,
+    sk->tcb->constructor(sk);
+
+  
+  free ::=
+    _rcv_queue.free-link-chain,
+    _snd_queue.free-link-chain,
+    { PDEBUG("freeing socket.\n"); kfree(&self); };
+  
+  local-port :> ushort ::= 
+    _local_port;
+  remote-port :> ushort ::=
+    _remote_port;
+  
+  
+  // LIST OF SOCKETS
+  
+  static _list-sentinel :> *TopSocket ::=
+    let s :> *TopSocket in
+      { s = (Socket *)&ptcp_prot; }, s
+    end;
+  _next-socket :> *TopSocket ::=
+    _sklist_next;
+  _prev-socket :> *TopSocket ::=
+    _sklist_prev;
+  
+  static first-socket :> *TopSocket ::=
+    _list-sentinel->next-socket;
+  next-socket :> *TopSocket ::=
+    (_sklist_next != _list-sentinel ==> _sklist_next)
+    ||| 0;
+  prev-socket :> *TopSocket ::=
+    (_sklist_prev != _list-sentinel ==> _sklist_prev)
+    ||| 0;
+  
+  static find(seg :> *Segment) :> *TopSocket ::=
+    let sk :> *TopSocket in
+      {	struct sk_buff *skb = AS_SK_BUFF(seg);
+	struct tcphdr *th = skb->h.th;
+	sk = (TopSocket *)__ptcp_v4_lookup(th, skb->nh.iph->saddr, th->source,
+			skb->nh.iph->daddr, th->dest, skb->dev->ifindex);
+      }, sk
+    end;
+  
+  
+  // RECEIVING
+  
+  receive-next-segment(seg :> *Segment) ::=
+    _rcv_queue.enqueue-tail(seg),
+    // NOTE: linux only does data_ready() once.
+    { AS_SOCK(&self)->data_ready(AS_SOCK(&self), 0); },
+    tcb->receive-hook(seg);
+  
+  max-receive-buffer :> int ::=
+    _rcv_buf;
+  
+  receive-buffer :> uint ::=
+    let i :> int in
+      { i = (AS_SOCK(&self)->rcvbuf - atomic_read(&AS_SOCK(&self)->rmem_alloc)); },
+      max(i, 0)
+    end;
+  
+  
+  // SENDING
+  
+  sendable :> bool ::=			// BSD so_snd.sb_cc
+    snd-len > tcb->unsent-offset;
+  
+  sendable-length :> uint ::=	// BSD so_snd.sb_cc
+    sendable ? snd-len - tcb->unsent-offset : 0;
+  
+  send-data-into {
+    
+    send-data-into(seg :> *Segment, data-len :> uint) ::=
+      help(first-send-segment, seg, tcb->unsent-offset, 0, data-len);
+      
+    
+    help(from :> *Segment, into :> *Segment, off :> uint,
+	 into-off :> uint, datalen :> uint) ::=
+      (!from || !datalen ==> true)
+      || (off >= from->data-length ==> help(next-send-segment(from), into,
+				    off - from->data-length, into-off, datalen))
+      || one-into(from, into, off, into-off, datalen);
+    
+    one-into(from :> *Segment, into :> *Segment, off :> uint,
+	     into-off :> uint, datalen :> uint) ::=
+      let here = min(datalen, from->data-length - off) in
+	from->copy-into(off, here, into, into-off),
+	help(next-send-segment(from), into,
+	     0, into-off + here, datalen - here)
+      end;
+    
+  }
+  
+  
+  // USER REQUESTS
+  
+  mark-writable ::= true;	// BSD checkl SB_NOTIFY, sowwakeup(so) ????????
+  
+  
+  // LINUX STUFF
+  
+  add_to_backlog(seg :> *Segment) ::=
+    { __skb_queue_tail(AS_SK_BUFF_HEAD(&_back_log), (struct sk_buff *)seg); };
+
+  locked :> bool ::=
+    let readers :> int in
+      { readers = atomic_read(&AS_SOCK(&self)->sock_readers); },
+      readers != 0
+    end;
+  
+  
+  
+  // CLOSING
+  
+  user-close ::=
+    { PDEBUG("USER CLOSE\n"); }
+    tcb->mark-close-after(sendable-length);
+  
+  drop ::= true;
+  
+  
+  // RETRANSMISSION
+  
+  remove-old-data {
+    
+    remove-old-data(amt :> uint) ::=
+      amt min= snd-len,
+      snd-len -= amt,
+      help(amt);
+    
+    help(amt :> uint) ::=
+      let from = first-send-segment in
+        (!from || !amt ==> true)
+        ||| (amt < from->data-length ==> 
+	     from->data-trim-front(amt))
+        ||| let l = from->data-length in
+      	      from->unlink,
+	      from->free,
+              help(amt - l)
+    	    end
+      end;
+    
+  }
+  
+  
+  // PRINTING
+  
+  print ::=
+    { PDEBUG("   -- %s sock: RCV QUEUE ", program_name); }
+    _rcv_queue.print-list,
+    { PDEBUG("\n                   SND QUEUE "); }
+    _snd_queue.print-list,
+    { PDEBUG("\n"); }
+    tcb->print;
+  
+} inline (sendable, sendable-length,
+	  send-data-into.help, send-data-into.one-into)
+  inline[0] print
+  hide ("_*", constructor)
+  show (_list-sentinel, _next-socket, _prev-socket);
+
+// hookup
+#define CUR_SOCKET Base.Socket
+#endif

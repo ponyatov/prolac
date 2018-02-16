@@ -1,0 +1,108 @@
+#ifndef RTT_PC
+#define RTT_PC
+#include "timeout.pc"
+
+module RTT-M.TCB :> P-TCB has .Socket {
+  
+  field timing-rtt :> short;
+  field timing-seqno :> seqint;
+  field RTT.smooth :> short;
+  field RTT.variance :> short;
+  
+  constructor(s :> *Socket) ::=
+    P-TCB(s),
+    RTT.smooth = 0,
+    RTT.variance = scale-variance(sec2tick(3)),
+    timing-rtt = 0,
+    timing-seqno = 0;
+  
+  
+  // FIELDS
+
+  unscale-smooth(x :> short) :> short ::= x / 8;
+  unscale-variance(x :> short) :> short ::= x / 4;
+  scale-smooth(x :> short) :> short ::= x * 8;
+  scale-variance(x :> short) :> short ::= x * 4;
+  
+  step-smooth(delta :> short) ::=
+    RTT.smooth += delta,
+    (RTT.smooth <= 0 ==> RTT.smooth = 1);
+  step-variance(delta :> short) ::=
+    RTT.variance += delta,
+    (RTT.variance <= 0 ==> RTT.variance = 1);
+  
+  
+  // TIMING ONE SEGMENT
+  
+  clear-timing-rtt ::= timing-rtt = 0;
+  
+  start-rtt-timer(seqno :> seqint) ::=
+    timing-rtt = 1,
+    timing-seqno = seqno;
+  
+  slow-timer ::=
+    super.slow-timer,
+    (timing-rtt ==> timing-rtt++);
+  
+  retransmit-alarm ::=
+    super.retransmit-alarm,
+    timing-rtt = 0;
+
+  send-hook(seqlen :> uint) ::=
+    inline super.send-hook(seqlen),
+    (seqlen && !retransmitting && !timing-rtt ==>
+     start-rtt-timer(snd_next - seqlen));
+  
+  
+  // ESTIMATED RTT
+  
+  estimated-rtt :> short ::=
+    unscale-smooth(RTT.smooth) + RTT.variance;
+  
+  min-rtt :> short ::= 2;
+  
+  
+  // UPDATING ESTIMATED RTT
+  
+  transparently-revoke-rtt-estimate ::=
+    RTT.variance += unscale-smooth(RTT.smooth),
+    RTT.smooth = 0;
+  
+  update-rtt-estimate(rtt :> short) ::=
+    (RTT.smooth ? updaters.update(rtt - 1) : updaters.init(rtt - 1)),
+    timing-rtt = 0;
+    // XXX SOCK softerror = 0 v2p840
+  
+  updaters {
+    
+    init(rtt :> short) ::=
+      RTT.smooth = scale-smooth(rtt),
+      RTT.variance = scale-variance(rtt / 2);
+    
+    update(rtt :> short) ::=
+      // Want RTT.smooth_new = rtt/8 + 7*RTT.smooth/8.
+      // Therefore, RTT.smooth_new = RTT.smooth + (rtt - RTT.smooth)/8.
+      // This incremental value is `delta'.
+      let delta = rtt - RTT.smooth / 8 in
+        step-smooth(delta),
+        (delta < 0 ==> delta = -delta),
+        delta -= unscale-variance(RTT.variance),
+        step-variance(delta)
+      end;
+    
+  }
+  
+  new-ack-hook(ackno :> seqint) ::=
+    (timing-rtt && ackno > timing-seqno ==> update-rtt-estimate(timing-rtt)),
+    inline super.new-ack-hook(ackno);
+  
+} inline (updaters.all, step-smooth, step-variance)
+  hide (timing-rtt, timing-seqno, scale-smooth, scale-variance,
+	unscale-smooth, unscale-variance, step-smooth, step-variance,
+	RTT, updaters);
+
+// hookup
+module RTT-M.P-TCB ::= CUR_TCB;
+#undef CUR_TCB
+#define CUR_TCB		RTT-M.TCB
+#endif

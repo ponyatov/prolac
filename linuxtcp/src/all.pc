@@ -1,0 +1,68 @@
+%{
+#ifdef HAVE_CONFIG_H
+# include <config.h>
+#endif
+#include <linux/skbuff.h>
+#include <linux/ip.h>
+#include <linux/tcp.h>
+#include <net/sock.h>
+#include <net/dst.h>
+#include <linux/random.h>
+#include <asm/byteorder.h>
+#include "ptcp.h"
+
+#include "support.c"
+#undef inline
+#undef min
+#undef max
+%}
+
+// hookup: base modules
+#include "header.pc"
+#include "segment.pc"
+#include "tcb.pc"
+#include "window.pc"
+#include "input.pc"
+#include "reass.pc"
+#include "sock.pc"
+#include "timeout.pc"
+#include "rtt.pc"
+#include "retrans.pc"
+
+// hookup: extensions
+#include "delayack.pc"
+#include "quickack.pc"
+#include "slowst.pc"
+#include "fastret.pc"
+#include "predict.pc"
+
+#include "output.pc"
+
+#include "option.pc"
+#include "mss.pc"
+
+#include "statistics.pc"
+#include "linuxxtra.pc"
+
+module TCB ::= CUR_TCB;
+module Input ::= CUR_INPUT;
+module Timeout ::= CUR_TIMEOUT;
+module Reassembly ::= CUR_REASSEMBLY;
+module Socket ::= CUR_SOCKET;
+module Output ::= CUR_OUTPUT;
+
+module TopTCB ::= CUR_TCB;
+module TopInput ::= CUR_INPUT;
+module TopSocket ::= CUR_SOCKET;
+module TopReassembly ::= CUR_REASSEMBLY;
+
+module Listen ::= CUR_LISTEN;
+module SynSent ::= CUR_SYN_SENT;
+module TrimToWindow ::= CUR_TRIM;
+module Reset ::= CUR_RESET;
+module Ack ::= CUR_ACK;
+module Fin ::= CUR_FIN;
+
+export
+  Input.receive-segment, Input.receive-segment-backlog,
+  Socket.initialize;

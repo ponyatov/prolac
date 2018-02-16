@@ -1,0 +1,38 @@
+#ifndef OPTION_PC
+#define OPTION_PC
+
+#define OPTION_EOL	0
+#define OPTION_NOP	1
+
+module Option.Input :> P-Input 
+has .TCB, .Segment, Headers.TCP 
+{
+
+  process-tcp-options ::=
+    !listen ==> 
+      let optp = seg->option-pointer,
+          optlen = seg->_tcp_header->header-length - TCP.header-size in
+        process-option-list(optp, optlen),
+      end,
+    true;
+
+  process-option-list(data :> *uchar, len :> int) ::=
+    ((len <= 0) || (data[0] == OPTION_EOL)) ==> true
+    ||| (data[0] == OPTION_NOP) ==> process-option-list(data + 1, len - 1)
+    ||| let l = data[1] in
+          process-option(data, len),
+          process-option-list(data + l, len - l)
+        end;
+
+  process-option(data :> *uchar, len :> int) ::= 
+    true;
+    
+} hide (process-option-list);
+
+//hookup
+
+module Option.P-Input ::= CUR_INPUT;
+#undef CUR_INPUT
+#define CUR_INPUT	Option.Input
+
+#endif /* OPTION_PC */
